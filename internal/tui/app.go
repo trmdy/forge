@@ -234,8 +234,8 @@ func (m model) viewLines() []string {
 }
 
 // stateStyle returns the appropriate style for an agent state.
-func (m model) stateStyle(state models.AgentState) styles.Style {
-	switch state {
+func (m model) stateStyle(agentState models.AgentState) lipgloss.Style {
+	switch agentState {
 	case models.AgentStateWorking:
 		return m.styles.Success
 	case models.AgentStateIdle:
