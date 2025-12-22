@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -21,6 +22,12 @@ func TestDefaultPollerConfig(t *testing.T) {
 	}
 	if config.MaxConcurrentPolls <= 0 {
 		t.Error("expected positive MaxConcurrentPolls")
+	}
+	if config.FailureBackoffBase <= 0 {
+		t.Error("expected positive FailureBackoffBase")
+	}
+	if config.FailureBackoffMax <= 0 {
+		t.Error("expected positive FailureBackoffMax")
 	}
 }
 
@@ -100,5 +107,74 @@ func TestPollerShouldPoll(t *testing.T) {
 				t.Errorf("shouldPoll() = %v, want %v", got, tt.expect)
 			}
 		})
+	}
+}
+
+func TestPollerShouldPollRespectsBackoff(t *testing.T) {
+	p := NewPoller(DefaultPollerConfig(), nil, nil)
+	now := time.Now()
+
+	p.pollStates["a1"] = &agentPollState{
+		agentID:      "a1",
+		lastPolledAt: now.Add(-10 * time.Second),
+		nextPollAt:   now.Add(10 * time.Second),
+	}
+
+	agent := &models.Agent{ID: "a1", State: models.AgentStateWorking}
+	if p.shouldPoll(agent, now) {
+		t.Error("expected backoff to skip polling")
+	}
+
+	if !p.shouldPoll(agent, now.Add(11*time.Second)) {
+		t.Error("expected polling after backoff elapses")
+	}
+}
+
+func TestPollerBackoffDuration(t *testing.T) {
+	config := PollerConfig{
+		FailureBackoffBase: 1 * time.Second,
+		FailureBackoffMax:  5 * time.Second,
+	}
+	p := NewPoller(config, nil, nil)
+
+	tests := []struct {
+		count int
+		want  time.Duration
+	}{
+		{count: 0, want: 0},
+		{count: 1, want: 1 * time.Second},
+		{count: 2, want: 2 * time.Second},
+		{count: 3, want: 4 * time.Second},
+		{count: 4, want: 5 * time.Second},
+		{count: 5, want: 5 * time.Second},
+	}
+
+	for _, tt := range tests {
+		got := p.backoffDuration(tt.count)
+		if got != tt.want {
+			t.Errorf("backoffDuration(%d) = %v, want %v", tt.count, got, tt.want)
+		}
+	}
+}
+
+func TestPollerFailureMarksStale(t *testing.T) {
+	p := NewPoller(DefaultPollerConfig(), nil, nil)
+	p.recordPollFailure("agent-1", errors.New("boom"))
+
+	state := p.pollStates["agent-1"]
+	if state == nil {
+		t.Fatal("expected poll state to exist")
+	}
+	if !state.stale {
+		t.Fatal("expected agent to be marked stale")
+	}
+	if state.failureCount != 1 {
+		t.Fatalf("expected failureCount 1, got %d", state.failureCount)
+	}
+	if state.nextPollAt.IsZero() {
+		t.Fatal("expected nextPollAt to be set")
+	}
+	if state.nextPollAt.Before(state.lastPolledAt) {
+		t.Fatal("expected nextPollAt after lastPolledAt")
 	}
 }

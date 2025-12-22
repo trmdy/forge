@@ -36,6 +36,14 @@ type PollerConfig struct {
 	// MaxConcurrentPolls limits concurrent state detection operations.
 	// Default: 10
 	MaxConcurrentPolls int
+
+	// FailureBackoffBase is the base delay for retry backoff after poll failures.
+	// Default: 1s
+	FailureBackoffBase time.Duration
+
+	// FailureBackoffMax caps the retry backoff for repeated failures.
+	// Default: 30s
+	FailureBackoffMax time.Duration
 }
 
 // DefaultPollerConfig returns sensible defaults.
@@ -45,6 +53,8 @@ func DefaultPollerConfig() PollerConfig {
 		IdleInterval:       2 * time.Second,
 		InactiveInterval:   5 * time.Second,
 		MaxConcurrentPolls: 10,
+		FailureBackoffBase: 1 * time.Second,
+		FailureBackoffMax:  30 * time.Second,
 	}
 }
 
@@ -53,6 +63,12 @@ type agentPollState struct {
 	agentID      string
 	lastPolledAt time.Time
 	lastState    models.AgentState
+	lastError    string
+	lastErrorAt  time.Time
+	failureCount int
+	nextPollAt   time.Time
+	stale        bool
+	staleSince   time.Time
 }
 
 // Poller manages periodic state detection for all agents.
@@ -84,6 +100,15 @@ func NewPoller(config PollerConfig, engine *Engine, agentRepo *db.AgentRepositor
 	}
 	if config.MaxConcurrentPolls <= 0 {
 		config.MaxConcurrentPolls = DefaultPollerConfig().MaxConcurrentPolls
+	}
+	if config.FailureBackoffBase <= 0 {
+		config.FailureBackoffBase = DefaultPollerConfig().FailureBackoffBase
+	}
+	if config.FailureBackoffMax <= 0 {
+		config.FailureBackoffMax = DefaultPollerConfig().FailureBackoffMax
+	}
+	if config.FailureBackoffMax < config.FailureBackoffBase {
+		config.FailureBackoffMax = config.FailureBackoffBase
 	}
 
 	return &Poller{
@@ -192,6 +217,10 @@ func (p *Poller) shouldPoll(agent *models.Agent, now time.Time) bool {
 	state, exists := p.pollStates[agent.ID]
 	p.mu.RUnlock()
 
+	if exists && !state.nextPollAt.IsZero() && now.Before(state.nextPollAt) {
+		return false
+	}
+
 	var interval time.Duration
 	switch {
 	case agent.State == models.AgentStateWorking:
@@ -241,18 +270,13 @@ func (p *Poller) doPoll(agentID string) {
 		if errors.Is(err, context.Canceled) {
 			return
 		}
+		p.recordPollFailure(agentID, err)
 		p.logger.Warn().Err(err).Str("agent_id", agentID).Msg("state detection failed")
 		return
 	}
 
 	// Update poll state
-	p.mu.Lock()
-	if p.pollStates[agentID] == nil {
-		p.pollStates[agentID] = &agentPollState{agentID: agentID}
-	}
-	p.pollStates[agentID].lastPolledAt = time.Now()
-	p.pollStates[agentID].lastState = result.State
-	p.mu.Unlock()
+	p.recordPollSuccess(agentID, result.State)
 
 	p.logger.Debug().
 		Str("agent_id", agentID).
@@ -285,6 +309,95 @@ func (p *Poller) GetLastPollTime(agentID string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return state.lastPolledAt, true
+}
+
+// IsStale reports whether the agent's last poll attempt failed and is stale.
+func (p *Poller) IsStale(agentID string) (bool, time.Time) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	state, exists := p.pollStates[agentID]
+	if !exists || !state.stale {
+		return false, time.Time{}
+	}
+	return true, state.staleSince
+}
+
+func (p *Poller) recordPollFailure(agentID string, err error) {
+	now := time.Now()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	state := p.pollStates[agentID]
+	if state == nil {
+		state = &agentPollState{agentID: agentID}
+		p.pollStates[agentID] = state
+	}
+
+	state.lastPolledAt = now
+	state.lastError = err.Error()
+	state.lastErrorAt = now
+	state.failureCount++
+	if !state.stale {
+		state.stale = true
+		state.staleSince = now
+	}
+	backoff := p.backoffDuration(state.failureCount)
+	if backoff > 0 {
+		state.nextPollAt = now.Add(backoff)
+	} else {
+		state.nextPollAt = time.Time{}
+	}
+}
+
+func (p *Poller) recordPollSuccess(agentID string, stateVal models.AgentState) {
+	now := time.Now()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	state := p.pollStates[agentID]
+	if state == nil {
+		state = &agentPollState{agentID: agentID}
+		p.pollStates[agentID] = state
+	}
+
+	state.lastPolledAt = now
+	state.lastState = stateVal
+	state.lastError = ""
+	state.lastErrorAt = time.Time{}
+	state.failureCount = 0
+	state.nextPollAt = time.Time{}
+	state.stale = false
+	state.staleSince = time.Time{}
+}
+
+func (p *Poller) backoffDuration(failureCount int) time.Duration {
+	if failureCount <= 0 {
+		return 0
+	}
+
+	base := p.config.FailureBackoffBase
+	if base <= 0 {
+		return 0
+	}
+	max := p.config.FailureBackoffMax
+	if max <= 0 {
+		max = base
+	}
+
+	backoff := base
+	for i := 1; i < failureCount; i++ {
+		if backoff >= max {
+			return max
+		}
+		backoff *= 2
+	}
+	if backoff > max {
+		backoff = max
+	}
+	return backoff
 }
 
 // ClearPollState removes poll state for an agent (e.g., when agent is terminated).
