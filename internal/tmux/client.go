@@ -15,6 +15,11 @@ type Executor interface {
 	Exec(ctx context.Context, cmd string) (stdout, stderr []byte, err error)
 }
 
+const (
+	historyChunkLines = 2000
+	historyMaxLines   = 20000
+)
+
 // LocalExecutor executes commands locally via os/exec.
 type LocalExecutor struct{}
 
@@ -32,6 +37,9 @@ func (e *LocalExecutor) Exec(ctx context.Context, cmd string) (stdout, stderr []
 type Client struct {
 	exec Executor
 }
+
+// AgentWindowName is the default window name used for agent panes.
+const AgentWindowName = "agents"
 
 // NewClient creates a new tmux client.
 func NewClient(exec Executor) *Client {
@@ -176,6 +184,58 @@ func (c *Client) NewSession(ctx context.Context, session, workDir string) error 
 	return nil
 }
 
+// NewWindow creates a new tmux window in the given session.
+func (c *Client) NewWindow(ctx context.Context, session, name, workDir string) error {
+	if strings.TrimSpace(session) == "" {
+		return fmt.Errorf("session name is required")
+	}
+
+	cmd := fmt.Sprintf("tmux new-window -t %s", escapeSessionName(session))
+	if strings.TrimSpace(name) != "" {
+		cmd = fmt.Sprintf("%s -n %s", cmd, escapeArg(name))
+	}
+	if strings.TrimSpace(workDir) != "" {
+		cmd = fmt.Sprintf("%s -c %s", cmd, escapeArg(workDir))
+	}
+
+	if _, _, err := c.exec.Exec(ctx, cmd); err != nil {
+		return fmt.Errorf("tmux new-window failed: %w", err)
+	}
+
+	return nil
+}
+
+// SelectWindow focuses the specified tmux window.
+func (c *Client) SelectWindow(ctx context.Context, target string) error {
+	if strings.TrimSpace(target) == "" {
+		return fmt.Errorf("target is required")
+	}
+
+	cmd := fmt.Sprintf("tmux select-window -t %s", escapeArg(target))
+	if _, _, err := c.exec.Exec(ctx, cmd); err != nil {
+		return fmt.Errorf("tmux select-window failed: %w", err)
+	}
+
+	return nil
+}
+
+// SelectLayout applies a tmux layout preset to a target.
+func (c *Client) SelectLayout(ctx context.Context, target string, layout string) error {
+	if strings.TrimSpace(target) == "" {
+		return fmt.Errorf("target is required")
+	}
+	if strings.TrimSpace(layout) == "" {
+		return fmt.Errorf("layout is required")
+	}
+
+	cmd := fmt.Sprintf("tmux select-layout -t %s %s", escapeArg(target), escapeArg(layout))
+	if _, _, err := c.exec.Exec(ctx, cmd); err != nil {
+		return fmt.Errorf("tmux select-layout failed: %w", err)
+	}
+
+	return nil
+}
+
 // KillSession terminates a tmux session.
 func (c *Client) KillSession(ctx context.Context, session string) error {
 	if strings.TrimSpace(session) == "" {
@@ -200,6 +260,7 @@ type Pane struct {
 	WindowIndex int    // window index within session
 	Index       int    // pane index within window
 	CurrentDir  string
+	Command     string
 	Active      bool
 }
 
@@ -209,7 +270,7 @@ func (c *Client) ListPanes(ctx context.Context, session string) ([]Pane, error) 
 		return nil, fmt.Errorf("session name is required")
 	}
 
-	cmd := fmt.Sprintf("tmux list-panes -t %s -F '#{pane_id}|#{window_index}|#{pane_index}|#{pane_current_path}|#{pane_active}'", escapeSessionName(session))
+	cmd := fmt.Sprintf("tmux list-panes -t %s -F '#{pane_id}|#{window_index}|#{pane_index}|#{pane_current_path}|#{pane_active}|#{pane_current_command}'", escapeSessionName(session))
 	stdout, stderr, err := c.exec.Exec(ctx, cmd)
 	if err != nil {
 		if isNoServerRunning(stderr) {
@@ -225,8 +286,8 @@ func (c *Client) ListPanes(ctx context.Context, session string) ([]Pane, error) 
 
 	var panes []Pane
 	for _, line := range strings.Split(output, "\n") {
-		parts := strings.SplitN(line, "|", 5)
-		if len(parts) != 5 {
+		parts := strings.SplitN(line, "|", 6)
+		if len(parts) != 6 {
 			return nil, fmt.Errorf("unexpected tmux output line: %q", line)
 		}
 
@@ -238,6 +299,7 @@ func (c *Client) ListPanes(ctx context.Context, session string) ([]Pane, error) 
 			Index:       index,
 			CurrentDir:  strings.TrimSpace(parts[3]),
 			Active:      strings.TrimSpace(parts[4]) == "1",
+			Command:     strings.TrimSpace(parts[5]),
 		})
 	}
 
@@ -362,9 +424,101 @@ func (c *Client) CapturePane(ctx context.Context, target string, history bool) (
 		return "", fmt.Errorf("target is required")
 	}
 
+	if !history {
+		return c.capturePaneRange(ctx, target, "", "")
+	}
+
+	return c.capturePaneHistory(ctx, target)
+}
+
+// HistorySize reports the number of history lines for a pane.
+func (c *Client) HistorySize(ctx context.Context, target string) (int, error) {
+	if strings.TrimSpace(target) == "" {
+		return 0, fmt.Errorf("target is required")
+	}
+
+	cmd := fmt.Sprintf("tmux display-message -p -t %s '#{history_size}'", escapeArg(target))
+	stdout, _, err := c.exec.Exec(ctx, cmd)
+	if err != nil {
+		return 0, fmt.Errorf("tmux display-message failed: %w", err)
+	}
+
+	raw := strings.TrimSpace(string(stdout))
+	if raw == "" {
+		return 0, fmt.Errorf("history size unavailable")
+	}
+	size, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid history size %q: %w", raw, err)
+	}
+	if size < 0 {
+		size = 0
+	}
+	return size, nil
+}
+
+func (c *Client) capturePaneHistory(ctx context.Context, target string) (string, error) {
+	historySize, err := c.HistorySize(ctx, target)
+	if err != nil {
+		if historyMaxLines > 0 {
+			return c.capturePaneRange(ctx, target, fmt.Sprintf("-%d", historyMaxLines), "")
+		}
+		return c.capturePaneAll(ctx, target)
+	}
+
+	if historySize <= historyChunkLines {
+		return c.capturePaneAll(ctx, target)
+	}
+
+	if historySize > historyMaxLines {
+		historySize = historyMaxLines
+	}
+
+	var builder strings.Builder
+	lastEndedWithNewline := false
+	appendChunk := func(chunk string) {
+		if chunk == "" {
+			return
+		}
+		if builder.Len() > 0 && !lastEndedWithNewline && !strings.HasPrefix(chunk, "\n") {
+			builder.WriteByte('\n')
+		}
+		builder.WriteString(chunk)
+		lastEndedWithNewline = strings.HasSuffix(chunk, "\n")
+	}
+
+	for start := -historySize; start < 0; start += historyChunkLines {
+		end := start + historyChunkLines - 1
+		if end >= 0 {
+			end = -1
+		}
+		chunk, err := c.capturePaneRange(ctx, target, strconv.Itoa(start), strconv.Itoa(end))
+		if err != nil {
+			return "", err
+		}
+		appendChunk(chunk)
+	}
+
+	visible, err := c.capturePaneRange(ctx, target, "0", "-")
+	if err != nil {
+		return "", err
+	}
+	appendChunk(visible)
+
+	return builder.String(), nil
+}
+
+func (c *Client) capturePaneAll(ctx context.Context, target string) (string, error) {
+	return c.capturePaneRange(ctx, target, "-", "")
+}
+
+func (c *Client) capturePaneRange(ctx context.Context, target, start, end string) (string, error) {
 	cmd := fmt.Sprintf("tmux capture-pane -t %s -p", escapeArg(target))
-	if history {
-		cmd = fmt.Sprintf("%s -S -", cmd) // Start from beginning of history
+	if strings.TrimSpace(start) != "" {
+		cmd = fmt.Sprintf("%s -S %s", cmd, start)
+	}
+	if strings.TrimSpace(end) != "" {
+		cmd = fmt.Sprintf("%s -E %s", cmd, end)
 	}
 
 	stdout, _, err := c.exec.Exec(ctx, cmd)

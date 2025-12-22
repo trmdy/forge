@@ -3,20 +3,45 @@ package tmux
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 type fakeExecutor struct {
-	stdout  []byte
-	stderr  []byte
-	err     error
-	lastCmd string
+	stdout      []byte
+	stderr      []byte
+	err         error
+	stdoutQueue [][]byte
+	stderrQueue [][]byte
+	errQueue    []error
+	lastCmd     string
+	commands    []string
 }
 
 func (f *fakeExecutor) Exec(ctx context.Context, cmd string) ([]byte, []byte, error) {
 	f.lastCmd = cmd
-	return f.stdout, f.stderr, f.err
+	f.commands = append(f.commands, cmd)
+
+	stdout := f.stdout
+	stderr := f.stderr
+	err := f.err
+
+	if len(f.stdoutQueue) > 0 {
+		stdout = f.stdoutQueue[0]
+		f.stdoutQueue = f.stdoutQueue[1:]
+	}
+	if len(f.stderrQueue) > 0 {
+		stderr = f.stderrQueue[0]
+		f.stderrQueue = f.stderrQueue[1:]
+	}
+	if len(f.errQueue) > 0 {
+		err = f.errQueue[0]
+		f.errQueue = f.errQueue[1:]
+	}
+
+	return stdout, stderr, err
 }
 
 func TestListSessions(t *testing.T) {
@@ -220,6 +245,91 @@ func TestNewSession_EmptyName(t *testing.T) {
 	}
 }
 
+func TestNewWindow(t *testing.T) {
+	exec := &fakeExecutor{}
+	client := NewClient(exec)
+
+	err := client.NewWindow(context.Background(), "my-session", "agents", "/home/user/project")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if exec.lastCmd == "" {
+		t.Fatal("expected command to be executed")
+	}
+	if !containsAll(exec.lastCmd, "new-window", "-t", "my-session", "-n", "agents") {
+		t.Errorf("unexpected command: %s", exec.lastCmd)
+	}
+}
+
+func TestNewWindow_EmptySession(t *testing.T) {
+	exec := &fakeExecutor{}
+	client := NewClient(exec)
+
+	err := client.NewWindow(context.Background(), "", "agents", "/some/path")
+	if err == nil {
+		t.Fatal("expected error for empty session name")
+	}
+}
+
+func TestSelectWindow(t *testing.T) {
+	exec := &fakeExecutor{}
+	client := NewClient(exec)
+
+	err := client.SelectWindow(context.Background(), "my-session:agents")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !containsAll(exec.lastCmd, "select-window", "-t") {
+		t.Errorf("unexpected command: %s", exec.lastCmd)
+	}
+}
+
+func TestSelectWindow_EmptyTarget(t *testing.T) {
+	exec := &fakeExecutor{}
+	client := NewClient(exec)
+
+	err := client.SelectWindow(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty target")
+	}
+}
+
+func TestSelectLayout(t *testing.T) {
+	exec := &fakeExecutor{}
+	client := NewClient(exec)
+
+	err := client.SelectLayout(context.Background(), "my-session:agents", "tiled")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !containsAll(exec.lastCmd, "select-layout", "-t", "my-session:agents", "tiled") {
+		t.Errorf("unexpected command: %s", exec.lastCmd)
+	}
+}
+
+func TestSelectLayout_EmptyTarget(t *testing.T) {
+	exec := &fakeExecutor{}
+	client := NewClient(exec)
+
+	err := client.SelectLayout(context.Background(), "", "tiled")
+	if err == nil {
+		t.Fatal("expected error for empty target")
+	}
+}
+
+func TestSelectLayout_EmptyLayout(t *testing.T) {
+	exec := &fakeExecutor{}
+	client := NewClient(exec)
+
+	err := client.SelectLayout(context.Background(), "my-session:agents", "")
+	if err == nil {
+		t.Fatal("expected error for empty layout")
+	}
+}
+
 func TestKillSession(t *testing.T) {
 	exec := &fakeExecutor{}
 	client := NewClient(exec)
@@ -248,7 +358,7 @@ func TestKillSession_NotFound(t *testing.T) {
 }
 
 func TestListPanes(t *testing.T) {
-	exec := &fakeExecutor{stdout: []byte("%1|0|0|/home/user/project|1\n%2|0|1|/home/user/project|0\n")}
+	exec := &fakeExecutor{stdout: []byte("%1|0|0|/home/user/project|1|bash\n%2|0|1|/home/user/project|0|opencode\n")}
 	client := NewClient(exec)
 
 	panes, err := client.ListPanes(context.Background(), "my-session")
@@ -261,8 +371,14 @@ func TestListPanes(t *testing.T) {
 	if panes[0].ID != "%1" || panes[0].WindowIndex != 0 || panes[0].Index != 0 || !panes[0].Active {
 		t.Errorf("unexpected first pane: %+v", panes[0])
 	}
+	if panes[0].Command != "bash" {
+		t.Errorf("expected first pane command bash, got %q", panes[0].Command)
+	}
 	if panes[1].ID != "%2" || panes[1].WindowIndex != 0 || panes[1].Index != 1 || panes[1].Active {
 		t.Errorf("unexpected second pane: %+v", panes[1])
+	}
+	if panes[1].Command != "opencode" {
+		t.Errorf("expected second pane command opencode, got %q", panes[1].Command)
 	}
 }
 
@@ -397,15 +513,92 @@ func TestCapturePane(t *testing.T) {
 }
 
 func TestCapturePane_WithHistory(t *testing.T) {
-	exec := &fakeExecutor{stdout: []byte("history content")}
+	exec := &fakeExecutor{
+		stdoutQueue: [][]byte{
+			[]byte("10"),
+			[]byte("history content"),
+		},
+	}
 	client := NewClient(exec)
 
 	_, err := client.CapturePane(context.Background(), "%1", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !containsAll(exec.lastCmd, "-S -") {
-		t.Errorf("expected history flag -S -: %s", exec.lastCmd)
+	if len(exec.commands) < 2 {
+		t.Fatalf("expected multiple tmux commands, got %d", len(exec.commands))
+	}
+	if !containsAll(exec.commands[0], "display-message", "history_size") {
+		t.Errorf("expected history size lookup, got: %s", exec.commands[0])
+	}
+	if !containsAll(exec.commands[1], "-S -") {
+		t.Errorf("expected history flag -S -: %s", exec.commands[1])
+	}
+}
+
+func TestCapturePane_WithHistoryChunked(t *testing.T) {
+	historySize := historyChunkLines + 250
+	exec := &fakeExecutor{
+		stdoutQueue: [][]byte{
+			[]byte(strconv.Itoa(historySize)),
+			[]byte("chunk1\n"),
+			[]byte("chunk2\n"),
+			[]byte("visible\n"),
+		},
+	}
+	client := NewClient(exec)
+
+	content, err := client.CapturePane(context.Background(), "%1", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "chunk1\nchunk2\nvisible\n" {
+		t.Fatalf("unexpected content: %q", content)
+	}
+	if len(exec.commands) != 4 {
+		t.Fatalf("expected 4 commands, got %d", len(exec.commands))
+	}
+
+	start := -historySize
+	firstEnd := start + historyChunkLines - 1
+	secondStart := start + historyChunkLines
+
+	if !containsAll(exec.commands[1], fmt.Sprintf("-S %d", start), fmt.Sprintf("-E %d", firstEnd)) {
+		t.Errorf("unexpected first history chunk: %s", exec.commands[1])
+	}
+	if !containsAll(exec.commands[2], fmt.Sprintf("-S %d", secondStart), "-E -1") {
+		t.Errorf("unexpected second history chunk: %s", exec.commands[2])
+	}
+	if !containsAll(exec.commands[3], "-S 0", "-E -") {
+		t.Errorf("unexpected visible chunk: %s", exec.commands[3])
+	}
+}
+
+func TestCapturePane_WithHistoryFallbackLimit(t *testing.T) {
+	exec := &fakeExecutor{
+		stdoutQueue: [][]byte{
+			[]byte(""),
+			[]byte("history content"),
+		},
+		errQueue: []error{
+			errors.New("history size error"),
+			nil,
+		},
+	}
+	client := NewClient(exec)
+
+	content, err := client.CapturePane(context.Background(), "%1", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "history content" {
+		t.Fatalf("unexpected content: %q", content)
+	}
+	if len(exec.commands) != 2 {
+		t.Fatalf("expected 2 commands, got %d", len(exec.commands))
+	}
+	if !containsAll(exec.commands[1], fmt.Sprintf("-S -%d", historyMaxLines)) {
+		t.Errorf("unexpected history fallback command: %s", exec.commands[1])
 	}
 }
 
