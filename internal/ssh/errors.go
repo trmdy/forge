@@ -8,6 +8,8 @@ import (
 var (
 	ErrPassphraseRequired  = errors.New("passphrase required for private key")
 	ErrSSHAgentUnavailable = errors.New("ssh agent not available")
+	ErrHostKeyRejected     = errors.New("host key rejected")
+	ErrHostKeyPromptUnavailable = errors.New("host key prompt unavailable")
 )
 
 // ExitError represents a non-zero exit code from a remote command.

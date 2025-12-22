@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,12 +26,18 @@ type NativeExecutor struct {
 	// Callback for passphrase prompting
 	PassphrasePrompt PassphrasePrompt
 
+	// HostKeyPrompt is used when an unknown host key is encountered.
+	HostKeyPrompt HostKeyPrompt
+
 	// KeepAliveInterval is the interval for sending keep-alive requests.
 	// Zero disables keep-alive.
 	KeepAliveInterval time.Duration
 
 	// KeepAliveTimeout is how long to wait for keep-alive response.
 	KeepAliveTimeout time.Duration
+
+	knownHostsFiles []string
+	knownHostsPath  string
 }
 
 // NativeExecutorOption configures a NativeExecutor.
@@ -40,6 +47,30 @@ type NativeExecutorOption func(*NativeExecutor)
 func WithPassphrasePrompt(prompt PassphrasePrompt) NativeExecutorOption {
 	return func(e *NativeExecutor) {
 		e.PassphrasePrompt = prompt
+	}
+}
+
+// WithHostKeyPrompt sets the host key prompt callback.
+func WithHostKeyPrompt(prompt HostKeyPrompt) NativeExecutorOption {
+	return func(e *NativeExecutor) {
+		e.HostKeyPrompt = prompt
+	}
+}
+
+// WithKnownHostsFiles sets the known_hosts files to load and the primary write path.
+func WithKnownHostsFiles(paths ...string) NativeExecutorOption {
+	return func(e *NativeExecutor) {
+		var files []string
+		for _, path := range paths {
+			if strings.TrimSpace(path) == "" {
+				continue
+			}
+			files = append(files, path)
+		}
+		e.knownHostsFiles = files
+		if len(files) > 0 {
+			e.knownHostsPath = files[0]
+		}
 	}
 }
 
@@ -124,14 +155,42 @@ func (e *NativeExecutor) buildConfig() (*xssh.ClientConfig, error) {
 		timeout = 30 * time.Second
 	}
 
+	hostKeyCallback, err := e.buildHostKeyCallback()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load known_hosts: %w", err)
+	}
+
 	config := &xssh.ClientConfig{
 		User:            e.options.User,
 		Auth:            authMethods,
 		Timeout:         timeout,
-		HostKeyCallback: xssh.InsecureIgnoreHostKey(), // TODO: Implement proper host key verification
+		HostKeyCallback: hostKeyCallback,
 	}
 
 	return config, nil
+}
+
+func (e *NativeExecutor) buildHostKeyCallback() (xssh.HostKeyCallback, error) {
+	files := e.knownHostsFiles
+	if len(files) == 0 {
+		defaultFiles, err := defaultKnownHostsFiles()
+		if err != nil {
+			return nil, err
+		}
+		files = defaultFiles
+	}
+
+	writePath := e.knownHostsPath
+	if writePath == "" && len(files) > 0 {
+		writePath = files[0]
+	}
+
+	prompt := e.HostKeyPrompt
+	if prompt == nil {
+		prompt = DefaultHostKeyPrompt
+	}
+
+	return buildKnownHostsCallback(files, writePath, prompt, e.logger)
 }
 
 // Exec runs a command and returns its stdout and stderr output.
@@ -301,7 +360,7 @@ func (e *NativeExecutor) dialViaProxy(ctx context.Context) (*xssh.Client, error)
 		User:            proxyUser,
 		Auth:            e.config.Auth,
 		Timeout:         e.config.Timeout,
-		HostKeyCallback: xssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: e.config.HostKeyCallback,
 	}
 
 	// Connect to proxy
