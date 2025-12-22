@@ -19,6 +19,7 @@ type WorkspaceCard struct {
 	AgentsWorking int
 	AgentsIdle    int
 	AgentsBlocked int
+	AgentsError   int
 	Alerts        []string
 }
 
@@ -29,10 +30,11 @@ func RenderWorkspaceCard(styleSet styles.Styles, card WorkspaceCard) string {
 	pulse := styleSet.Info.Render(fmt.Sprintf("Pulse: %s", defaultIfEmpty(card.Pulse, "idle")))
 
 	agents := fmt.Sprintf(
-		"Agents: %s %s %s",
+		"Agents: %s %s %s %s",
 		styleSet.StatusWork.Render(fmt.Sprintf("W:%d", card.AgentsWorking)),
 		styleSet.StatusIdle.Render(fmt.Sprintf("I:%d", card.AgentsIdle)),
 		styleSet.Warning.Render(fmt.Sprintf("B:%d", card.AgentsBlocked)),
+		styleSet.Error.Render(fmt.Sprintf("E:%d", card.AgentsError)),
 	)
 
 	alertLine := styleSet.Muted.Render("Alerts: none")

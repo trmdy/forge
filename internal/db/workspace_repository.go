@@ -190,7 +190,11 @@ func (r *WorkspaceRepository) ListWithAgentCounts(ctx context.Context) ([]*model
 		SELECT 
 			w.id, w.name, w.node_id, w.repo_path, w.tmux_session, w.status,
 			w.git_info_json, w.created_at, w.updated_at,
-			COUNT(a.id) as agent_count
+			COUNT(a.id) as agent_count,
+			COALESCE(SUM(CASE WHEN a.state IN ('working', 'starting') THEN 1 ELSE 0 END), 0) as working,
+			COALESCE(SUM(CASE WHEN a.state IN ('idle', 'stopped') THEN 1 ELSE 0 END), 0) as idle,
+			COALESCE(SUM(CASE WHEN a.state IN ('awaiting_approval', 'rate_limited', 'paused') THEN 1 ELSE 0 END), 0) as blocked,
+			COALESCE(SUM(CASE WHEN a.state = 'error' THEN 1 ELSE 0 END), 0) as error
 		FROM workspaces w
 		LEFT JOIN agents a ON w.id = a.workspace_id
 		GROUP BY w.id
@@ -487,6 +491,10 @@ func (r *WorkspaceRepository) scanWorkspacesWithCounts(rows *sql.Rows) ([]*model
 			&createdAt,
 			&updatedAt,
 			&workspace.AgentCount,
+			&workspace.AgentStats.Working,
+			&workspace.AgentStats.Idle,
+			&workspace.AgentStats.Blocked,
+			&workspace.AgentStats.Error,
 		)
 
 		if err != nil {

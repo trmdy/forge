@@ -3,12 +3,9 @@ package ssh
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -73,159 +70,53 @@ type ConnectionOptions struct {
 	Timeout time.Duration
 }
 
-// ApplySSHConfig applies settings from ~/.ssh/config to the connection options.
-// It looks up the host alias and updates Host, Port, User, KeyPath, and ProxyJump
-// based on matching Host directives.
-//
-// TODO(OrangeCreek): Full implementation in swarm-y6b.
-func ApplySSHConfig(opts ConnectionOptions) (ConnectionOptions, error) {
-	if strings.TrimSpace(opts.Host) == "" {
+// ApplySSHConfig applies settings from SSH config files to the connection options.
+// It looks up the host alias and updates Host, Port, User, KeyPath, ProxyJump, and
+// SSH multiplexing settings. Explicitly set fields are not overridden.
+func ApplySSHConfig(opts ConnectionOptions, paths ...string) (ConnectionOptions, error) {
+	host := strings.TrimSpace(opts.Host)
+	if host == "" {
 		return opts, nil
 	}
 
-	configPath, err := defaultSSHConfigPath()
+	config, err := loadSSHConfig(paths)
 	if err != nil {
 		return opts, err
 	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return opts, nil
-		}
-		return opts, err
+	if config == nil {
+		return opts, nil
 	}
 
-	host := strings.TrimSpace(opts.Host)
-	currentMatch := true
-	lines := strings.Split(string(data), "\n")
+	resolved := config.Resolve(host)
 
-	for _, raw := range lines {
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	if resolved.HostName != "" {
+		opts.Host = resolved.HostName
+	}
+	if opts.User == "" && resolved.User != "" {
+		opts.User = resolved.User
+	}
+	if opts.Port == 0 && resolved.Port > 0 {
+		opts.Port = resolved.Port
+	}
+	if opts.ProxyJump == "" && resolved.ProxyJump != "" {
+		if proxy := normalizeProxyJump(resolved.ProxyJump); proxy != "" {
+			opts.ProxyJump = proxy
 		}
-
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-
-		key := strings.ToLower(fields[0])
-		value := strings.Join(fields[1:], " ")
-
-		switch key {
-		case "host":
-			currentMatch = matchesHostPatterns(host, fields[1:])
-			continue
-		case "match":
-			// Ignore Match blocks for now.
-			currentMatch = false
-			continue
-		}
-
-		if !currentMatch {
-			continue
-		}
-
-		switch key {
-		case "hostname":
-			if v := strings.TrimSpace(value); v != "" {
-				opts.Host = v
-			}
-		case "user":
-			if opts.User == "" {
-				opts.User = strings.TrimSpace(value)
-			}
-		case "port":
-			if opts.Port == 0 {
-				port, err := strconv.Atoi(strings.TrimSpace(value))
-				if err == nil {
-					opts.Port = port
-				}
-			}
-		case "identityfile":
-			if opts.KeyPath == "" {
-				if expanded := expandSSHPath(value); expanded != "" {
-					opts.KeyPath = expanded
-				}
-			}
-		case "proxyjump":
-			if opts.ProxyJump == "" {
-				proxy := normalizeProxyJump(value)
-				if proxy != "" {
-					opts.ProxyJump = proxy
-				}
-			}
-		case "controlmaster":
-			if opts.ControlMaster == "" {
-				opts.ControlMaster = strings.TrimSpace(value)
-			}
-		case "controlpath":
-			if opts.ControlPath == "" {
-				if expanded := expandSSHPath(value); expanded != "" {
-					opts.ControlPath = expanded
-				}
-			}
-		case "controlpersist":
-			if opts.ControlPersist == "" {
-				opts.ControlPersist = strings.TrimSpace(value)
-			}
-		}
+	}
+	if opts.KeyPath == "" && len(resolved.IdentityFiles) > 0 {
+		opts.KeyPath = resolved.IdentityFiles[0]
+	}
+	if opts.ControlMaster == "" && resolved.ControlMaster != "" {
+		opts.ControlMaster = resolved.ControlMaster
+	}
+	if opts.ControlPath == "" && resolved.ControlPath != "" {
+		opts.ControlPath = resolved.ControlPath
+	}
+	if opts.ControlPersist == "" && resolved.ControlPersist != "" {
+		opts.ControlPersist = resolved.ControlPersist
 	}
 
 	return opts, nil
-}
-
-func defaultSSHConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".ssh", "config"), nil
-}
-
-func matchesHostPatterns(host string, patterns []string) bool {
-	if len(patterns) == 0 {
-		return false
-	}
-
-	lowerHost := strings.ToLower(host)
-	matched := false
-	for _, pattern := range patterns {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" {
-			continue
-		}
-		negated := strings.HasPrefix(pattern, "!")
-		if negated {
-			pattern = strings.TrimPrefix(pattern, "!")
-		}
-		if pattern == "" {
-			continue
-		}
-
-		if matchHostPattern(lowerHost, pattern) {
-			if negated {
-				return false
-			}
-			matched = true
-		}
-	}
-
-	return matched
-}
-
-func matchHostPattern(host, pattern string) bool {
-	lowerPattern := strings.ToLower(pattern)
-	if lowerPattern == host {
-		return true
-	}
-	matched, err := path.Match(lowerPattern, host)
-	if err != nil {
-		return false
-	}
-	return matched
 }
 
 func expandSSHPath(value string) string {

@@ -291,8 +291,16 @@ func renderGridCard(styleSet styles.Styles, ws *models.Workspace, selected bool,
 
 	pulseLine := renderPulseLine(styleSet, ws, pulseFrame, events)
 
-	// Agent count
-	agentLine := styleSet.Text.Render(fmt.Sprintf("  Agents: %d", ws.AgentCount))
+	// Agent stats
+	agentLine := styleSet.Muted.Render("  Agents: 0")
+	if ws.AgentCount > 0 {
+		agentLine = fmt.Sprintf("  %s %s %s %s",
+			styleSet.StatusWork.Render(fmt.Sprintf("W:%d", ws.AgentStats.Working)),
+			styleSet.StatusIdle.Render(fmt.Sprintf("I:%d", ws.AgentStats.Idle)),
+			styleSet.Warning.Render(fmt.Sprintf("B:%d", ws.AgentStats.Blocked)),
+			styleSet.Error.Render(fmt.Sprintf("E:%d", ws.AgentStats.Error)),
+		)
+	}
 
 	// Alert indicator
 	alertLine := ""
