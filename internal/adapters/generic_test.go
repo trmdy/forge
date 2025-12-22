@@ -246,11 +246,11 @@ func TestGenericAdapter_Capabilities(t *testing.T) {
 func TestBuiltinAdapters(t *testing.T) {
 	tests := []struct {
 		name    string
-		adapter *GenericAdapter
+		adapter AgentAdapter
 		tier    models.AdapterTier
 	}{
 		{"opencode", OpenCodeAdapter(), models.AdapterTierGeneric},
-		{"claude-code", ClaudeCodeAdapter(), models.AdapterTierGeneric},
+		{"claude-code", ClaudeCodeAdapter(), models.AdapterTierTelemetry},
 		{"codex", CodexAdapter(), models.AdapterTierGeneric},
 		{"gemini", GeminiAdapter(), models.AdapterTierGeneric},
 		{"generic", GenericFallbackAdapter(), models.AdapterTierGeneric},

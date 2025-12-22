@@ -230,21 +230,8 @@ func OpenCodeAdapter() *GenericAdapter {
 }
 
 // ClaudeCodeAdapter creates an adapter for Claude Code CLI.
-func ClaudeCodeAdapter() *GenericAdapter {
-	return NewGenericAdapter(
-		string(models.AgentTypeClaudeCode),
-		"claude",
-		WithIdleIndicators(
-			">",
-			"claude>",
-			"ready",
-		),
-		WithBusyIndicators(
-			"thinking",
-			"writing",
-			"reading",
-		),
-	)
+func ClaudeCodeAdapter() AgentAdapter {
+	return NewClaudeCodeAdapter()
 }
 
 // CodexAdapter creates an adapter for OpenAI Codex CLI.
