@@ -641,6 +641,9 @@ func (s *Service) RestartAgent(ctx context.Context, id string) (*models.Agent, e
 		Str("new_agent_id", newAgent.ID).
 		Msg("agent restarted")
 
+	// Emit event for the new agent
+	s.publishEvent(ctx, models.EventTypeAgentRestarted, newAgent.ID, nil)
+
 	return newAgent, nil
 }
 
