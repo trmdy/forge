@@ -44,6 +44,13 @@ type QueueItem struct {
 	// Status is the current item status.
 	Status QueueItemStatus `json:"status"`
 
+	// Attempts is the number of dispatch attempts recorded.
+	Attempts int `json:"attempts"`
+
+	// EvaluationCount tracks how many times a conditional item has been evaluated.
+	// Used to prevent infinite re-queue loops.
+	EvaluationCount int `json:"evaluation_count,omitempty"`
+
 	// Payload contains the item data (type-specific).
 	Payload json.RawMessage `json:"payload"`
 
@@ -135,6 +142,9 @@ func (q *QueueItem) Validate() error {
 	validation := &ValidationErrors{}
 	if q.Type == "" {
 		validation.AddMessage("type", "queue item type is required")
+	}
+	if q.Attempts < 0 {
+		validation.AddMessage("attempts", "attempts must be greater than or equal to 0")
 	}
 	if len(q.Payload) == 0 {
 		validation.Add("payload", ErrInvalidQueueItem)

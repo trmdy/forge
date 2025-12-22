@@ -15,6 +15,12 @@ CREATE TABLE IF NOT EXISTS nodes (
     ssh_target TEXT,  -- NULL for local node
     ssh_backend TEXT NOT NULL DEFAULT 'auto' CHECK (ssh_backend IN ('native', 'system', 'auto')),
     ssh_key_path TEXT,
+    ssh_agent_forwarding INTEGER NOT NULL DEFAULT 0,
+    ssh_proxy_jump TEXT,
+    ssh_control_master TEXT,
+    ssh_control_path TEXT,
+    ssh_control_persist TEXT,
+    ssh_timeout_seconds INTEGER,
     status TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('online', 'offline', 'unknown')),
     is_local INTEGER NOT NULL DEFAULT 0,
     last_seen_at TEXT,  -- ISO8601 timestamp
@@ -106,6 +112,7 @@ CREATE TABLE IF NOT EXISTS queue_items (
     type TEXT NOT NULL CHECK (type IN ('message', 'pause', 'conditional')),
     position INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'dispatched', 'completed', 'failed', 'skipped')),
+    attempts INTEGER NOT NULL DEFAULT 0,
     payload_json TEXT NOT NULL,  -- JSON blob for payload
     error_message TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
