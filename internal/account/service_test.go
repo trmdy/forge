@@ -322,6 +322,67 @@ func TestService_SetCooldownForRateLimit(t *testing.T) {
 	}
 }
 
+func TestService_SweepExpiredCooldowns(t *testing.T) {
+	cfg := config.DefaultConfig()
+	ctx := context.Background()
+
+	database, err := db.OpenInMemory()
+	if err != nil {
+		t.Fatalf("failed to open in-memory database: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := database.Migrate(ctx); err != nil {
+		t.Fatalf("failed to migrate database: %v", err)
+	}
+
+	repo := db.NewAccountRepository(database)
+	publisher := &testPublisher{}
+	service := NewService(cfg, WithRepository(repo), WithPublisher(publisher))
+
+	expired := time.Now().UTC().Add(-1 * time.Minute)
+	account := &models.Account{
+		ID:            "acct-expired",
+		Provider:      models.ProviderOpenAI,
+		ProfileName:   "acct-expired",
+		CredentialRef: "env:OPENAI_API_KEY",
+		IsActive:      true,
+		CooldownUntil: &expired,
+	}
+
+	if err := repo.Create(ctx, account); err != nil {
+		t.Fatalf("failed to create account in repo: %v", err)
+	}
+	if err := service.AddAccount(ctx, account); err != nil {
+		t.Fatalf("AddAccount failed: %v", err)
+	}
+
+	cleared, err := service.SweepExpiredCooldowns(ctx)
+	if err != nil {
+		t.Fatalf("SweepExpiredCooldowns failed: %v", err)
+	}
+	if cleared != 1 {
+		t.Fatalf("expected 1 cooldown cleared, got %d", cleared)
+	}
+	if account.CooldownUntil != nil {
+		t.Fatal("expected cooldown to be cleared in service")
+	}
+
+	stored, err := repo.Get(ctx, account.ID)
+	if err != nil {
+		t.Fatalf("failed to get account from repo: %v", err)
+	}
+	if stored.CooldownUntil != nil {
+		t.Fatal("expected cooldown to be cleared in repo")
+	}
+
+	if len(publisher.events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(publisher.events))
+	}
+	if publisher.events[0].Type != models.EventTypeCooldownEnded {
+		t.Fatalf("expected cooldown ended event, got %s", publisher.events[0].Type)
+	}
+}
+
 func timePtr(t time.Time) *time.Time {
 	return &t
 }

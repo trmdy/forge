@@ -291,18 +291,85 @@ func (s *Service) applyCooldown(ctx context.Context, id string, duration time.Du
 // ClearCooldown removes cooldown from an account.
 func (s *Service) ClearCooldown(ctx context.Context, id string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	account, exists := s.accounts[id]
 	if !exists {
+		s.mu.Unlock()
 		return ErrAccountNotFound
 	}
-
+	hadCooldown := account.CooldownUntil != nil
 	account.CooldownUntil = nil
 	account.UpdatedAt = time.Now().UTC()
+	snapshot := cloneAccount(account)
+	s.mu.Unlock()
+
+	if s.repo != nil {
+		if err := s.repo.ClearCooldown(ctx, id); err != nil {
+			return err
+		}
+	}
+
+	if hadCooldown {
+		s.publishCooldownEndedEvent(ctx, snapshot)
+	}
 
 	s.logger.Debug().Str("account_id", id).Msg("account cooldown cleared")
 	return nil
+}
+
+// SweepExpiredCooldowns clears any cooldowns that have expired.
+// Returns the number of accounts cleared and the first error encountered.
+func (s *Service) SweepExpiredCooldowns(ctx context.Context) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	now := time.Now().UTC()
+	s.mu.RLock()
+	var expired []string
+	for id, account := range s.accounts {
+		if account.CooldownUntil != nil && now.After(*account.CooldownUntil) {
+			expired = append(expired, id)
+		}
+	}
+	s.mu.RUnlock()
+
+	var cleared int
+	var firstErr error
+	for _, id := range expired {
+		if err := s.ClearCooldown(ctx, id); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			s.logger.Warn().Err(err).Str("account_id", id).Msg("failed to clear expired cooldown")
+			continue
+		}
+		cleared++
+	}
+
+	return cleared, firstErr
+}
+
+// StartCooldownMonitor launches a background loop that clears expired cooldowns.
+func (s *Service) StartCooldownMonitor(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = time.Second
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := s.SweepExpiredCooldowns(ctx); err != nil && !errors.Is(err, context.Canceled) {
+					s.logger.Warn().Err(err).Msg("cooldown sweep failed")
+				}
+			}
+		}
+	}()
 }
 
 // GetAvailable returns an available account for a provider.
@@ -531,6 +598,21 @@ func (s *Service) publishRateLimitEvent(ctx context.Context, account *models.Acc
 		EntityType: models.EntityTypeAccount,
 		EntityID:   account.ID,
 		Payload:    payload,
+	})
+}
+
+func (s *Service) publishCooldownEndedEvent(ctx context.Context, account *models.Account) {
+	if s.publisher == nil {
+		return
+	}
+	if account == nil {
+		return
+	}
+
+	s.publisher.Publish(ctx, &models.Event{
+		Type:       models.EventTypeCooldownEnded,
+		EntityType: models.EntityTypeAccount,
+		EntityID:   account.ID,
 	})
 }
 
