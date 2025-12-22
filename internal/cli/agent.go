@@ -1,0 +1,638 @@
+// Package cli provides agent management CLI commands.
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"text/tabwriter"
+	"time"
+
+	"github.com/opencode-ai/swarm/internal/agent"
+	"github.com/opencode-ai/swarm/internal/db"
+	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/opencode-ai/swarm/internal/node"
+	"github.com/opencode-ai/swarm/internal/tmux"
+	"github.com/opencode-ai/swarm/internal/workspace"
+	"github.com/spf13/cobra"
+)
+
+var (
+	// agent spawn flags
+	agentSpawnWorkspace string
+	agentSpawnType      string
+	agentSpawnCount     int
+	agentSpawnProfile   string
+	agentSpawnPrompt    string
+	agentSpawnNoWait    bool
+
+	// agent list flags
+	agentListWorkspace string
+	agentListState     string
+
+	// agent terminate flags
+	agentTerminateForce bool
+
+	// agent pause flags
+	agentPauseDuration string
+
+	// agent send flags
+	agentSendSkipIdle bool
+)
+
+func init() {
+	rootCmd.AddCommand(agentCmd)
+	agentCmd.AddCommand(agentSpawnCmd)
+	agentCmd.AddCommand(agentListCmd)
+	agentCmd.AddCommand(agentStatusCmd)
+	agentCmd.AddCommand(agentTerminateCmd)
+	agentCmd.AddCommand(agentInterruptCmd)
+	agentCmd.AddCommand(agentPauseCmd)
+	agentCmd.AddCommand(agentResumeCmd)
+	agentCmd.AddCommand(agentSendCmd)
+	agentCmd.AddCommand(agentRestartCmd)
+
+	// Spawn flags
+	agentSpawnCmd.Flags().StringVarP(&agentSpawnWorkspace, "workspace", "w", "", "workspace name or ID (required)")
+	agentSpawnCmd.Flags().StringVarP(&agentSpawnType, "type", "t", "opencode", "agent type (opencode, claude-code, codex, gemini, generic)")
+	agentSpawnCmd.Flags().IntVarP(&agentSpawnCount, "count", "n", 1, "number of agents to spawn")
+	agentSpawnCmd.Flags().StringVarP(&agentSpawnProfile, "profile", "p", "", "account profile to use")
+	agentSpawnCmd.Flags().StringVar(&agentSpawnPrompt, "prompt", "", "initial prompt to send after spawn")
+	agentSpawnCmd.Flags().BoolVar(&agentSpawnNoWait, "no-wait", false, "don't wait for agent to be ready")
+	agentSpawnCmd.MarkFlagRequired("workspace")
+
+	// List flags
+	agentListCmd.Flags().StringVarP(&agentListWorkspace, "workspace", "w", "", "filter by workspace")
+	agentListCmd.Flags().StringVar(&agentListState, "state", "", "filter by state (working, idle, paused, error, etc.)")
+
+	// Terminate flags
+	agentTerminateCmd.Flags().BoolVarP(&agentTerminateForce, "force", "f", false, "force termination")
+
+	// Pause flags
+	agentPauseCmd.Flags().StringVarP(&agentPauseDuration, "duration", "d", "5m", "pause duration (e.g., 30s, 5m, 1h)")
+
+	// Send flags
+	agentSendCmd.Flags().BoolVar(&agentSendSkipIdle, "skip-idle-check", false, "send even if agent is not idle")
+}
+
+var agentCmd = &cobra.Command{
+	Use:   "agent",
+	Short: "Manage agents",
+	Long: `Manage AI coding agents running in workspaces.
+
+Agents are instances of AI coding CLIs (opencode, claude-code, etc.) running
+in tmux panes within workspaces.`,
+}
+
+var agentSpawnCmd = &cobra.Command{
+	Use:   "spawn",
+	Short: "Spawn a new agent",
+	Long: `Spawn one or more AI coding agents in a workspace.
+
+The agent will be started in a new tmux pane in the workspace's session.`,
+	Example: `  # Spawn a single opencode agent
+  swarm agent spawn --workspace my-project
+
+  # Spawn 3 claude-code agents with a specific profile
+  swarm agent spawn -w my-project -t claude-code -n 3 -p work-account
+
+  # Spawn with an initial prompt
+  swarm agent spawn -w my-project --prompt "Fix all linting errors"`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		database, err := openDatabase()
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		// Create services
+		nodeRepo := db.NewNodeRepository(database)
+		nodeService := node.NewService(nodeRepo)
+		wsRepo := db.NewWorkspaceRepository(database)
+		agentRepo := db.NewAgentRepository(database)
+		queueRepo := db.NewQueueRepository(database)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+
+		tmuxClient := tmux.NewLocalClient()
+		agentService := agent.NewService(agentRepo, queueRepo, wsService, tmuxClient)
+
+		// Find workspace
+		ws, err := findWorkspace(ctx, wsRepo, agentSpawnWorkspace)
+		if err != nil {
+			return err
+		}
+
+		// Parse agent type
+		agentType := models.AgentType(agentSpawnType)
+		switch agentType {
+		case models.AgentTypeOpenCode, models.AgentTypeClaudeCode,
+			models.AgentTypeCodex, models.AgentTypeGemini, models.AgentTypeGeneric:
+			// Valid
+		default:
+			return fmt.Errorf("invalid agent type: %s", agentSpawnType)
+		}
+
+		// Spawn agents
+		var agents []*models.Agent
+		for i := 0; i < agentSpawnCount; i++ {
+			opts := agent.SpawnOptions{
+				WorkspaceID:   ws.ID,
+				Type:          agentType,
+				AccountID:     agentSpawnProfile,
+				InitialPrompt: agentSpawnPrompt,
+			}
+			// If --no-wait is set, use a very short timeout to skip waiting
+			if agentSpawnNoWait {
+				opts.ReadyTimeout = 1 * time.Millisecond
+			}
+
+			a, err := agentService.SpawnAgent(ctx, opts)
+			if err != nil {
+				if len(agents) > 0 {
+					// Partial success
+					if !IsJSONOutput() && !IsJSONLOutput() {
+						fmt.Printf("Spawned %d/%d agents before error: %v\n", len(agents), agentSpawnCount, err)
+					}
+					break
+				}
+				return fmt.Errorf("failed to spawn agent: %w", err)
+			}
+			agents = append(agents, a)
+		}
+
+		if IsJSONOutput() || IsJSONLOutput() {
+			if len(agents) == 1 {
+				return WriteOutput(os.Stdout, agents[0])
+			}
+			return WriteOutput(os.Stdout, agents)
+		}
+
+		if len(agents) == 1 {
+			a := agents[0]
+			fmt.Printf("Agent spawned:\n")
+			fmt.Printf("  ID:        %s\n", a.ID)
+			fmt.Printf("  Type:      %s\n", a.Type)
+			fmt.Printf("  Workspace: %s\n", ws.Name)
+			fmt.Printf("  Pane:      %s\n", a.TmuxPane)
+			fmt.Printf("  State:     %s\n", a.State)
+			if a.AccountID != "" {
+				fmt.Printf("  Profile:   %s\n", a.AccountID)
+			}
+		} else {
+			fmt.Printf("Spawned %d agents:\n", len(agents))
+			for _, a := range agents {
+				fmt.Printf("  %s (%s) - %s\n", a.ID, a.Type, a.State)
+			}
+		}
+
+		return nil
+	},
+}
+
+var agentListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List agents",
+	Long:  "List all agents managed by Swarm.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		database, err := openDatabase()
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		nodeRepo := db.NewNodeRepository(database)
+		nodeService := node.NewService(nodeRepo)
+		wsRepo := db.NewWorkspaceRepository(database)
+		agentRepo := db.NewAgentRepository(database)
+		queueRepo := db.NewQueueRepository(database)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+
+		tmuxClient := tmux.NewLocalClient()
+		agentService := agent.NewService(agentRepo, queueRepo, wsService, tmuxClient)
+
+		// Build options
+		opts := agent.ListAgentsOptions{
+			IncludeQueueLength: true,
+		}
+
+		if agentListWorkspace != "" {
+			ws, err := findWorkspace(ctx, wsRepo, agentListWorkspace)
+			if err != nil {
+				return err
+			}
+			opts.WorkspaceID = ws.ID
+		}
+
+		if agentListState != "" {
+			state := models.AgentState(agentListState)
+			opts.State = &state
+		}
+
+		agents, err := agentService.ListAgents(ctx, opts)
+		if err != nil {
+			return fmt.Errorf("failed to list agents: %w", err)
+		}
+
+		if IsJSONOutput() || IsJSONLOutput() {
+			return WriteOutput(os.Stdout, agents)
+		}
+
+		if len(agents) == 0 {
+			fmt.Println("No agents found")
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tTYPE\tSTATE\tWORKSPACE\tPANE\tQUEUE")
+		for _, a := range agents {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\n",
+				truncate(a.ID, 12), a.Type, a.State, truncate(a.WorkspaceID, 12), a.TmuxPane, a.QueueLength)
+		}
+		return w.Flush()
+	},
+}
+
+var agentStatusCmd = &cobra.Command{
+	Use:   "status <agent-id>",
+	Short: "Show agent status",
+	Long:  "Display detailed status for an agent including state, queue, and recent activity.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		agentID := args[0]
+
+		database, err := openDatabase()
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		nodeRepo := db.NewNodeRepository(database)
+		nodeService := node.NewService(nodeRepo)
+		wsRepo := db.NewWorkspaceRepository(database)
+		agentRepo := db.NewAgentRepository(database)
+		queueRepo := db.NewQueueRepository(database)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+
+		tmuxClient := tmux.NewLocalClient()
+		agentService := agent.NewService(agentRepo, queueRepo, wsService, tmuxClient)
+
+		stateResult, err := agentService.GetAgentState(ctx, agentID)
+		if err != nil {
+			if errors.Is(err, agent.ErrServiceAgentNotFound) {
+				return fmt.Errorf("agent '%s' not found", agentID)
+			}
+			return fmt.Errorf("failed to get agent status: %w", err)
+		}
+
+		if IsJSONOutput() || IsJSONLOutput() {
+			return WriteOutput(os.Stdout, stateResult)
+		}
+
+		a := stateResult.Agent
+		fmt.Printf("Agent: %s\n", a.ID)
+		fmt.Printf("Type:  %s\n", a.Type)
+		fmt.Printf("State: %s\n", a.State)
+		fmt.Printf("  Confidence: %s\n", a.StateInfo.Confidence)
+		fmt.Printf("  Reason:     %s\n", a.StateInfo.Reason)
+		if len(a.StateInfo.Evidence) > 0 {
+			fmt.Printf("  Evidence:\n")
+			for _, e := range a.StateInfo.Evidence {
+				fmt.Printf("    - %s\n", e)
+			}
+		}
+		fmt.Println()
+
+		fmt.Printf("Workspace: %s\n", a.WorkspaceID)
+		fmt.Printf("Pane:      %s\n", a.TmuxPane)
+		fmt.Printf("Pane Active: %v\n", stateResult.PaneActive)
+		fmt.Println()
+
+		if a.AccountID != "" {
+			fmt.Printf("Profile: %s\n", a.AccountID)
+		}
+
+		fmt.Printf("Queue Length: %d\n", stateResult.QueueLength)
+
+		if a.LastActivity != nil {
+			fmt.Printf("Last Activity: %s\n", a.LastActivity.Format(time.RFC3339))
+		}
+
+		if a.PausedUntil != nil {
+			fmt.Printf("Paused Until: %s\n", a.PausedUntil.Format(time.RFC3339))
+		}
+
+		fmt.Printf("\nCreated: %s\n", a.CreatedAt.Format(time.RFC3339))
+
+		if stateResult.LastOutput != "" {
+			fmt.Printf("\nLast Output (truncated):\n")
+			output := stateResult.LastOutput
+			if len(output) > 500 {
+				output = output[len(output)-500:]
+			}
+			fmt.Println(output)
+		}
+
+		return nil
+	},
+}
+
+var agentTerminateCmd = &cobra.Command{
+	Use:     "terminate <agent-id>",
+	Aliases: []string{"kill", "rm"},
+	Short:   "Terminate an agent",
+	Long:    "Stop and remove an agent. This kills the tmux pane and removes the agent record.",
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		agentID := args[0]
+
+		database, err := openDatabase()
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		nodeRepo := db.NewNodeRepository(database)
+		nodeService := node.NewService(nodeRepo)
+		wsRepo := db.NewWorkspaceRepository(database)
+		agentRepo := db.NewAgentRepository(database)
+		queueRepo := db.NewQueueRepository(database)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+
+		tmuxClient := tmux.NewLocalClient()
+		agentService := agent.NewService(agentRepo, queueRepo, wsService, tmuxClient)
+
+		if err := agentService.TerminateAgent(ctx, agentID); err != nil {
+			if errors.Is(err, agent.ErrServiceAgentNotFound) {
+				return fmt.Errorf("agent '%s' not found", agentID)
+			}
+			return fmt.Errorf("failed to terminate agent: %w", err)
+		}
+
+		if IsJSONOutput() || IsJSONLOutput() {
+			return WriteOutput(os.Stdout, map[string]any{
+				"terminated": true,
+				"agent_id":   agentID,
+			})
+		}
+
+		fmt.Printf("Agent '%s' terminated\n", agentID)
+		return nil
+	},
+}
+
+var agentInterruptCmd = &cobra.Command{
+	Use:   "interrupt <agent-id>",
+	Short: "Interrupt an agent",
+	Long:  "Send Ctrl+C to an agent to interrupt its current operation.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		agentID := args[0]
+
+		database, err := openDatabase()
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		nodeRepo := db.NewNodeRepository(database)
+		nodeService := node.NewService(nodeRepo)
+		wsRepo := db.NewWorkspaceRepository(database)
+		agentRepo := db.NewAgentRepository(database)
+		queueRepo := db.NewQueueRepository(database)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+
+		tmuxClient := tmux.NewLocalClient()
+		agentService := agent.NewService(agentRepo, queueRepo, wsService, tmuxClient)
+
+		if err := agentService.InterruptAgent(ctx, agentID); err != nil {
+			if errors.Is(err, agent.ErrServiceAgentNotFound) {
+				return fmt.Errorf("agent '%s' not found", agentID)
+			}
+			return fmt.Errorf("failed to interrupt agent: %w", err)
+		}
+
+		if IsJSONOutput() || IsJSONLOutput() {
+			return WriteOutput(os.Stdout, map[string]any{
+				"interrupted": true,
+				"agent_id":    agentID,
+			})
+		}
+
+		fmt.Printf("Agent '%s' interrupted\n", agentID)
+		return nil
+	},
+}
+
+var agentPauseCmd = &cobra.Command{
+	Use:   "pause <agent-id>",
+	Short: "Pause an agent",
+	Long:  "Pause an agent for a specified duration. The scheduler will skip paused agents.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		agentID := args[0]
+
+		duration, err := time.ParseDuration(agentPauseDuration)
+		if err != nil {
+			return fmt.Errorf("invalid duration: %w", err)
+		}
+
+		database, err := openDatabase()
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		nodeRepo := db.NewNodeRepository(database)
+		nodeService := node.NewService(nodeRepo)
+		wsRepo := db.NewWorkspaceRepository(database)
+		agentRepo := db.NewAgentRepository(database)
+		queueRepo := db.NewQueueRepository(database)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+
+		tmuxClient := tmux.NewLocalClient()
+		agentService := agent.NewService(agentRepo, queueRepo, wsService, tmuxClient)
+
+		if err := agentService.PauseAgent(ctx, agentID, duration); err != nil {
+			if errors.Is(err, agent.ErrServiceAgentNotFound) {
+				return fmt.Errorf("agent '%s' not found", agentID)
+			}
+			return fmt.Errorf("failed to pause agent: %w", err)
+		}
+
+		pausedUntil := time.Now().Add(duration)
+
+		if IsJSONOutput() || IsJSONLOutput() {
+			return WriteOutput(os.Stdout, map[string]any{
+				"paused":       true,
+				"agent_id":     agentID,
+				"duration":     duration.String(),
+				"paused_until": pausedUntil.Format(time.RFC3339),
+			})
+		}
+
+		fmt.Printf("Agent '%s' paused until %s\n", agentID, pausedUntil.Format(time.RFC3339))
+		return nil
+	},
+}
+
+var agentResumeCmd = &cobra.Command{
+	Use:   "resume <agent-id>",
+	Short: "Resume a paused agent",
+	Long:  "Resume an agent that was previously paused.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		agentID := args[0]
+
+		database, err := openDatabase()
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		nodeRepo := db.NewNodeRepository(database)
+		nodeService := node.NewService(nodeRepo)
+		wsRepo := db.NewWorkspaceRepository(database)
+		agentRepo := db.NewAgentRepository(database)
+		queueRepo := db.NewQueueRepository(database)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+
+		tmuxClient := tmux.NewLocalClient()
+		agentService := agent.NewService(agentRepo, queueRepo, wsService, tmuxClient)
+
+		if err := agentService.ResumeAgent(ctx, agentID); err != nil {
+			if errors.Is(err, agent.ErrServiceAgentNotFound) {
+				return fmt.Errorf("agent '%s' not found", agentID)
+			}
+			return fmt.Errorf("failed to resume agent: %w", err)
+		}
+
+		if IsJSONOutput() || IsJSONLOutput() {
+			return WriteOutput(os.Stdout, map[string]any{
+				"resumed":  true,
+				"agent_id": agentID,
+			})
+		}
+
+		fmt.Printf("Agent '%s' resumed\n", agentID)
+		return nil
+	},
+}
+
+var agentSendCmd = &cobra.Command{
+	Use:   "send <agent-id> <message>",
+	Short: "Send a message to an agent",
+	Long:  "Send a text message to an agent. By default, requires the agent to be idle.",
+	Args:  cobra.MinimumNArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		agentID := args[0]
+		message := args[1]
+		if len(args) > 2 {
+			// Join remaining args as message
+			for _, arg := range args[2:] {
+				message += " " + arg
+			}
+		}
+
+		database, err := openDatabase()
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		nodeRepo := db.NewNodeRepository(database)
+		nodeService := node.NewService(nodeRepo)
+		wsRepo := db.NewWorkspaceRepository(database)
+		agentRepo := db.NewAgentRepository(database)
+		queueRepo := db.NewQueueRepository(database)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+
+		tmuxClient := tmux.NewLocalClient()
+		agentService := agent.NewService(agentRepo, queueRepo, wsService, tmuxClient)
+
+		opts := &agent.SendMessageOptions{
+			SkipIdleCheck: agentSendSkipIdle,
+		}
+
+		if err := agentService.SendMessage(ctx, agentID, message, opts); err != nil {
+			if errors.Is(err, agent.ErrServiceAgentNotFound) {
+				return fmt.Errorf("agent '%s' not found", agentID)
+			}
+			if errors.Is(err, agent.ErrAgentNotIdle) {
+				return fmt.Errorf("agent is not idle (use --skip-idle-check to force)")
+			}
+			return fmt.Errorf("failed to send message: %w", err)
+		}
+
+		if IsJSONOutput() || IsJSONLOutput() {
+			return WriteOutput(os.Stdout, map[string]any{
+				"sent":     true,
+				"agent_id": agentID,
+				"message":  message,
+			})
+		}
+
+		fmt.Printf("Message sent to agent '%s'\n", agentID)
+		return nil
+	},
+}
+
+var agentRestartCmd = &cobra.Command{
+	Use:   "restart <agent-id>",
+	Short: "Restart an agent",
+	Long:  "Terminate and respawn an agent with the same configuration.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		agentID := args[0]
+
+		database, err := openDatabase()
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		nodeRepo := db.NewNodeRepository(database)
+		nodeService := node.NewService(nodeRepo)
+		wsRepo := db.NewWorkspaceRepository(database)
+		agentRepo := db.NewAgentRepository(database)
+		queueRepo := db.NewQueueRepository(database)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+
+		tmuxClient := tmux.NewLocalClient()
+		agentService := agent.NewService(agentRepo, queueRepo, wsService, tmuxClient)
+
+		newAgent, err := agentService.RestartAgent(ctx, agentID)
+		if err != nil {
+			if errors.Is(err, agent.ErrServiceAgentNotFound) {
+				return fmt.Errorf("agent '%s' not found", agentID)
+			}
+			return fmt.Errorf("failed to restart agent: %w", err)
+		}
+
+		if IsJSONOutput() || IsJSONLOutput() {
+			return WriteOutput(os.Stdout, map[string]any{
+				"restarted":    true,
+				"old_agent_id": agentID,
+				"new_agent":    newAgent,
+			})
+		}
+
+		fmt.Printf("Agent restarted:\n")
+		fmt.Printf("  Old ID: %s\n", agentID)
+		fmt.Printf("  New ID: %s\n", newAgent.ID)
+		fmt.Printf("  Pane:   %s\n", newAgent.TmuxPane)
+		fmt.Printf("  State:  %s\n", newAgent.State)
+		return nil
+	},
+}
