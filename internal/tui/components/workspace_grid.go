@@ -45,12 +45,15 @@ func (g *WorkspaceGrid) FilteredWorkspaces() []*models.Workspace {
 		return g.Workspaces
 	}
 
-	filter := strings.ToLower(g.Filter)
+	filter := strings.ToLower(strings.TrimSpace(g.Filter))
+	if filter == "" {
+		return g.Workspaces
+	}
+	tokens := strings.Fields(filter)
 	filtered := make([]*models.Workspace, 0)
 	for _, ws := range g.Workspaces {
-		name := strings.ToLower(ws.Name)
-		path := strings.ToLower(ws.RepoPath)
-		if strings.Contains(name, filter) || strings.Contains(path, filter) {
+		haystack := strings.ToLower(strings.Join([]string{ws.Name, ws.RepoPath}, " "))
+		if matchesTokens(haystack, tokens) {
 			filtered = append(filtered, ws)
 		}
 	}
@@ -105,6 +108,40 @@ func (g *WorkspaceGrid) SelectedWorkspace() *models.Workspace {
 		return nil
 	}
 	return filtered[g.SelectedIndex]
+}
+
+// SelectByID selects a workspace by ID within the current filtered list.
+func (g *WorkspaceGrid) SelectByID(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	filtered := g.FilteredWorkspaces()
+	for idx, ws := range filtered {
+		if ws != nil && strings.EqualFold(ws.ID, id) {
+			g.SelectedIndex = idx
+			g.ensureVisible()
+			return true
+		}
+	}
+	return false
+}
+
+// SelectByName selects a workspace by name within the current filtered list.
+func (g *WorkspaceGrid) SelectByName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	filtered := g.FilteredWorkspaces()
+	for idx, ws := range filtered {
+		if ws != nil && strings.EqualFold(ws.Name, name) {
+			g.SelectedIndex = idx
+			g.ensureVisible()
+			return true
+		}
+	}
+	return false
 }
 
 // clampSelection ensures selection is within bounds.
@@ -298,4 +335,39 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+func matchesTokens(haystack string, tokens []string) bool {
+	if len(tokens) == 0 {
+		return true
+	}
+	for _, token := range tokens {
+		if strings.Contains(haystack, token) {
+			continue
+		}
+		if !fuzzyMatch(haystack, token) {
+			return false
+		}
+	}
+	return true
+}
+
+func fuzzyMatch(haystack, token string) bool {
+	if token == "" {
+		return true
+	}
+	needle := []rune(strings.ReplaceAll(token, " ", ""))
+	if len(needle) == 0 {
+		return true
+	}
+	matchIdx := 0
+	for _, r := range []rune(haystack) {
+		if r == needle[matchIdx] {
+			matchIdx++
+			if matchIdx == len(needle) {
+				return true
+			}
+		}
+	}
+	return false
 }

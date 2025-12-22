@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -65,9 +66,15 @@ type model struct {
 	view          viewID
 	selectedView  viewID
 	showHelp      bool
+	showInspector bool
+	selectedAgent string
 	pausedAll     bool
 	statusMsg     string
 	statusWarn    bool
+	searchOpen    bool
+	searchQuery   string
+	searchTarget  viewID
+	agentFilter   string
 	paletteOpen   bool
 	paletteQuery  string
 	paletteIndex  int
@@ -127,6 +134,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.paletteOpen {
 			return m.updatePalette(msg)
 		}
+		if m.searchOpen {
+			return m.updateSearch(msg)
+		}
+		if msg.String() == "tab" || msg.String() == "i" {
+			m.showInspector = !m.showInspector
+			return m, nil
+		}
 		// Handle grid navigation in workspace view
 		if m.view == viewWorkspace && m.workspaceGrid != nil {
 			switch msg.String() {
@@ -150,7 +164,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "/":
-				// TODO: Open search/filter mode
+				m.openSearch(viewWorkspace)
+				return m, nil
+			}
+		}
+		if m.view == viewAgent {
+			switch msg.String() {
+			case "/":
+				m.openSearch(viewAgent)
 				return m, nil
 			}
 		}
@@ -158,15 +179,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "1":
 			m.view = viewDashboard
 			m.selectedView = m.view
+			m.closeSearch()
 		case "2":
 			m.view = viewWorkspace
 			m.selectedView = m.view
+			m.closeSearch()
 		case "3":
 			m.view = viewAgent
 			m.selectedView = m.view
+			m.closeSearch()
 		case "g":
 			m.view = nextView(m.view)
 			m.selectedView = m.view
+			m.closeSearch()
 		case "left", "up":
 			if m.view != viewWorkspace {
 				m.selectedView = prevView(m.selectedView)
@@ -258,7 +283,7 @@ func (m model) View() string {
 		lines = append(lines, m.styles.Muted.Render(fmt.Sprintf("Viewport: %dx%d", m.width, m.height)))
 	}
 
-	lines = append(lines, "", m.styles.Muted.Render("Shortcuts: arrows select | enter open | q quit | ? help | g goto | / search | r refresh | 1/2/3 views"))
+	lines = append(lines, "", m.styles.Muted.Render("Shortcuts: arrows select | enter open | i inspector | q quit | ? help | g goto | / search | r refresh | 1/2/3 views"))
 
 	return fmt.Sprintf("%s\n", joinLines(lines))
 }
@@ -307,40 +332,233 @@ func prevView(current viewID) viewID {
 func (m *model) viewLines() []string {
 	switch m.view {
 	case viewWorkspace:
+		mainWidth := m.width
+		if m.showInspector {
+			if width, _, _, _ := m.inspectorLayout(); width > 0 {
+				mainWidth = width
+			}
+		}
 		// Update grid dimensions based on window size
 		if m.workspaceGrid != nil {
-			m.workspaceGrid.Width = m.width
+			m.workspaceGrid.Width = mainWidth
 			m.workspaceGrid.Height = m.height - 10 // Reserve space for header/footer
 		}
 
 		lines := []string{
 			m.styles.Accent.Render("Workspace view"),
 			m.styles.Muted.Render("↑↓←→/hjkl: navigate | Enter: open | /: filter"),
-			"",
 		}
+		if line := m.searchLine(viewWorkspace); line != "" {
+			lines = append(lines, line)
+		}
+		lines = append(lines, "")
 		if m.workspaceGrid != nil {
 			lines = append(lines, m.workspaceGrid.Render(m.styles))
 		} else {
 			lines = append(lines, m.styles.Muted.Render("No workspaces. Use 'swarm ws create' to create one."))
 		}
-		return lines
+		return m.renderWithInspector(lines, "Workspace inspector", m.workspaceInspectorLines())
 	case viewAgent:
 		lines := []string{
 			m.styles.Accent.Render("Agent view"),
+			m.styles.Muted.Render("Confidence shows how certain state detection is."),
+		}
+		if line := m.searchLine(viewAgent); line != "" {
+			lines = append(lines, line)
 		}
 		if len(m.agentStates) == 0 {
-			lines = append(lines, m.styles.Muted.Render("No agents tracked yet."))
+			lines = append(lines, m.styles.Muted.Render("Sample data (no agents tracked yet)."))
 		} else {
 			lines = append(lines, m.styles.Text.Render(fmt.Sprintf("Tracking %d agent(s):", len(m.agentStates))))
-			for id, state := range m.agentStates {
-				badge := components.RenderAgentStateBadge(m.styles, state)
-				lines = append(lines, fmt.Sprintf("  %s: %s", shortID(id), badge))
-			}
 		}
-		return lines
+		for _, card := range m.agentCards() {
+			lines = append(lines, components.RenderAgentCard(m.styles, card), "")
+		}
+		return m.renderWithInspector(lines, "Agent inspector", m.agentInspectorLines())
 	default:
 		return []string{m.dashboardView()}
 	}
+}
+
+func (m model) renderWithInspector(mainLines []string, title string, inspectorLines []string) []string {
+	if !m.showInspector {
+		return mainLines
+	}
+
+	mainWidth, inspectorWidth, gap, vertical := m.inspectorLayout()
+	if inspectorWidth <= 0 {
+		inspectorWidth = mainWidth
+	}
+
+	mainContent := joinLines(mainLines)
+	mainPanel := lipgloss.NewStyle().Width(mainWidth).MaxWidth(mainWidth).Render(mainContent)
+	inspector := components.RenderInspectorPanel(m.styles, title, inspectorLines, inspectorWidth)
+
+	if vertical {
+		lines := append([]string{}, mainLines...)
+		lines = append(lines, "", inspector)
+		return lines
+	}
+
+	spacer := strings.Repeat(" ", gap)
+	return []string{lipgloss.JoinHorizontal(lipgloss.Top, mainPanel, spacer, inspector)}
+}
+
+func (m model) inspectorLayout() (mainWidth, inspectorWidth, gap int, vertical bool) {
+	total := m.width
+	if total == 0 {
+		total = 96
+	}
+
+	gap = 1
+	inspectorWidth = clampInt(total/4, 22, 30)
+	mainWidth = total - inspectorWidth - gap
+
+	if mainWidth < 32 {
+		inspectorWidth = clampInt(total-32-gap, 18, inspectorWidth)
+		mainWidth = total - inspectorWidth - gap
+	}
+
+	if mainWidth < 20 || inspectorWidth < 18 {
+		return total, total, gap, true
+	}
+
+	return mainWidth, inspectorWidth, gap, false
+}
+
+func (m model) workspaceInspectorLines() []string {
+	if m.workspaceGrid == nil {
+		return []string{m.styles.Muted.Render("No workspace data loaded.")}
+	}
+	ws := m.workspaceGrid.SelectedWorkspace()
+	if ws == nil {
+		return []string{m.styles.Muted.Render("No workspace selected.")}
+	}
+
+	name := ws.Name
+	if name == "" {
+		name = ws.ID
+	}
+
+	repo := ws.RepoPath
+	if repo != "" {
+		repo = filepath.Base(repo)
+	}
+	if repo == "" {
+		repo = "--"
+	}
+
+	lines := []string{
+		m.styles.Text.Render(fmt.Sprintf("Name: %s", name)),
+		m.styles.Muted.Render(fmt.Sprintf("ID: %s", defaultLabel(ws.ID))),
+		m.styles.Muted.Render(fmt.Sprintf("Repo: %s", repo)),
+		m.styles.Muted.Render(fmt.Sprintf("Node: %s", defaultLabel(ws.NodeID))),
+		fmt.Sprintf("Status: %s", renderWorkspaceStatusLabel(m.styles, ws.Status)),
+		m.styles.Text.Render(fmt.Sprintf("Agents: %d", ws.AgentCount)),
+	}
+
+	if ws.GitInfo != nil {
+		branch := defaultLabel(ws.GitInfo.Branch)
+		line := m.styles.Muted.Render(fmt.Sprintf("Branch: %s", branch))
+		if ws.GitInfo.IsDirty {
+			line += m.styles.Warning.Render(" *dirty")
+		}
+		lines = append(lines, line)
+	}
+
+	if len(ws.Alerts) > 0 {
+		lines = append(lines, m.styles.Warning.Render(fmt.Sprintf("Alerts: %d", len(ws.Alerts))))
+	}
+
+	return lines
+}
+
+func (m model) agentInspectorLines() []string {
+	cards := m.agentCards()
+	if len(cards) == 0 {
+		return []string{m.styles.Muted.Render("No agents available.")}
+	}
+
+	card := mostRecentAgentCard(cards)
+	if card == nil {
+		return []string{m.styles.Muted.Render("No agent selected.")}
+	}
+
+	stateBadge := components.RenderAgentStateBadge(m.styles, card.State)
+	lines := []string{
+		m.styles.Text.Render(fmt.Sprintf("Name: %s", defaultLabel(card.Name))),
+		m.styles.Muted.Render(fmt.Sprintf("Type: %s", defaultLabel(string(card.Type)))),
+		m.styles.Muted.Render(fmt.Sprintf("Model: %s", defaultLabel(card.Model))),
+		fmt.Sprintf("State: %s", stateBadge),
+		m.styles.Muted.Render(fmt.Sprintf("Confidence: %s", formatConfidence(card.Confidence))),
+	}
+
+	reason := strings.TrimSpace(card.Reason)
+	if reason != "" {
+		lines = append(lines, m.styles.Muted.Render(fmt.Sprintf("Reason: %s", truncateText(reason, 60))))
+	}
+
+	queue := "--"
+	if card.QueueLength >= 0 {
+		queue = fmt.Sprintf("%d", card.QueueLength)
+	}
+	lines = append(lines, m.styles.Muted.Render(fmt.Sprintf("Queue: %s", queue)))
+	lines = append(lines, m.styles.Muted.Render(fmt.Sprintf("Last: %s", formatActivityTime(card.LastActivity))))
+
+	return lines
+}
+
+func mostRecentAgentCard(cards []components.AgentCard) *components.AgentCard {
+	if len(cards) == 0 {
+		return nil
+	}
+	best := cards[0]
+	for _, card := range cards[1:] {
+		if card.LastActivity == nil {
+			continue
+		}
+		if best.LastActivity == nil || card.LastActivity.After(*best.LastActivity) {
+			best = card
+		}
+	}
+	return &best
+}
+
+func formatConfidence(confidence models.StateConfidence) string {
+	switch confidence {
+	case models.StateConfidenceHigh:
+		return "High"
+	case models.StateConfidenceMedium:
+		return "Medium"
+	case models.StateConfidenceLow:
+		return "Low"
+	default:
+		return "Unknown"
+	}
+}
+
+func formatActivityTime(ts *time.Time) string {
+	if ts == nil || ts.IsZero() {
+		return "--"
+	}
+	return ts.Format("15:04:05")
+}
+
+func defaultLabel(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "--"
+	}
+	return value
+}
+
+func truncateText(value string, maxLen int) string {
+	if maxLen < 3 {
+		maxLen = 3
+	}
+	if len(value) <= maxLen {
+		return value
+	}
+	return value[:maxLen-3] + "..."
 }
 
 func (m model) dashboardView() string {
@@ -505,6 +723,19 @@ func renderNodeAlerts(styleSet styles.Styles, count int) string {
 	return styleSet.Warning.Render(fmt.Sprintf("!%d", count))
 }
 
+func renderWorkspaceStatusLabel(styleSet styles.Styles, status models.WorkspaceStatus) string {
+	switch status {
+	case models.WorkspaceStatusActive:
+		return styleSet.Success.Render("Active")
+	case models.WorkspaceStatusInactive:
+		return styleSet.Muted.Render("Inactive")
+	case models.WorkspaceStatusError:
+		return styleSet.Error.Render("Error")
+	default:
+		return styleSet.Muted.Render("Unknown")
+	}
+}
+
 func clampInt(value, min, max int) int {
 	if value < min {
 		return min
@@ -581,8 +812,111 @@ func (m model) helpLines() []string {
 		m.styles.Accent.Render("Help"),
 		m.styles.Muted.Render("Arrows: select view"),
 		m.styles.Muted.Render("Enter: open selected view"),
+		m.styles.Muted.Render("i/tab: toggle inspector"),
 		m.styles.Muted.Render("g: cycle views"),
 		m.styles.Muted.Render("q: quit"),
+	}
+}
+
+func (m *model) openSearch(target viewID) {
+	m.searchOpen = true
+	m.searchTarget = target
+	m.searchQuery = ""
+	m.applySearchFilter()
+}
+
+func (m *model) closeSearch() {
+	if m.searchTarget == viewWorkspace && m.workspaceGrid != nil {
+		selectedID := ""
+		if ws := m.workspaceGrid.SelectedWorkspace(); ws != nil {
+			selectedID = ws.ID
+		}
+		m.workspaceGrid.SetFilter("")
+		if selectedID != "" {
+			m.workspaceGrid.SelectByID(selectedID)
+		}
+	}
+	if m.searchTarget == viewAgent {
+		m.agentFilter = ""
+	}
+	m.searchOpen = false
+	m.searchQuery = ""
+	m.searchTarget = viewDashboard
+}
+
+func (m model) searchLine(target viewID) string {
+	if !m.searchOpen || m.searchTarget != target {
+		return ""
+	}
+	label := "Search"
+	if target == viewWorkspace {
+		label = "Search workspaces"
+	}
+	if target == viewAgent {
+		label = "Search agents"
+	}
+	query := m.searchQuery
+	if query == "" {
+		query = "..."
+	}
+	return m.styles.Muted.Render(fmt.Sprintf("%s: %s", label, query))
+}
+
+func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyRunes:
+		m.searchQuery += string(msg.Runes)
+	case tea.KeyBackspace, tea.KeyDelete:
+		m.searchQuery = trimLastRune(m.searchQuery)
+	}
+
+	switch msg.String() {
+	case "esc":
+		m.closeSearch()
+		return m, nil
+	case "enter":
+		m.applySearchSelection()
+		m.closeSearch()
+		return m, nil
+	}
+
+	m.applySearchFilter()
+	return m, nil
+}
+
+func (m *model) applySearchFilter() {
+	switch m.searchTarget {
+	case viewWorkspace:
+		if m.workspaceGrid != nil {
+			m.workspaceGrid.SetFilter(m.searchQuery)
+		}
+	case viewAgent:
+		m.agentFilter = m.searchQuery
+	}
+}
+
+func (m *model) applySearchSelection() {
+	if strings.TrimSpace(m.searchQuery) == "" {
+		return
+	}
+	switch m.searchTarget {
+	case viewWorkspace:
+		if m.workspaceGrid == nil {
+			return
+		}
+		ws := m.workspaceGrid.SelectedWorkspace()
+		if ws == nil {
+			return
+		}
+		m.selectedWsID = ws.ID
+		m.setStatus(fmt.Sprintf("Jumped to workspace %s", workspaceDisplayName(ws)), false)
+	case viewAgent:
+		cards := m.agentCards()
+		if len(cards) == 0 {
+			return
+		}
+		m.selectedAgent = cards[0].Name
+		m.setStatus(fmt.Sprintf("Jumped to agent %s", cards[0].Name), false)
 	}
 }
 
@@ -843,6 +1177,39 @@ func shortID(value string) string {
 	return value[:8]
 }
 
+func (m model) agentCards() []components.AgentCard {
+	if len(m.agentStates) == 0 {
+		return filterAgentCards(sampleAgentCards(), m.agentFilter)
+	}
+
+	cards := make([]components.AgentCard, 0, len(m.agentStates))
+	for id, state := range m.agentStates {
+		info := m.agentInfo[id]
+		var lastPtr *time.Time
+		if ts, ok := m.agentLast[id]; ok && !ts.IsZero() {
+			last := ts
+			lastPtr = &last
+		}
+		card := components.AgentCard{
+			Name:         fmt.Sprintf("Agent %s", shortID(id)),
+			State:        state,
+			Confidence:   info.Confidence,
+			Reason:       info.Reason,
+			QueueLength:  -1,
+			LastActivity: lastPtr,
+		}
+		if !matchesSearch(m.agentFilter, agentCardHaystack(card)) {
+			continue
+		}
+		cards = append(cards, card)
+	}
+
+	sort.Slice(cards, func(i, j int) bool {
+		return cards[i].Name < cards[j].Name
+	})
+	return cards
+}
+
 func sampleNodes() []nodeSummary {
 	return []nodeSummary{
 		{
@@ -960,4 +1327,186 @@ func sampleWorkspaceCards() []components.WorkspaceCard {
 			Alerts:        []string{"Rate limited"},
 		},
 	}
+}
+
+func sampleAgentCards() []components.AgentCard {
+	now := time.Now()
+	return []components.AgentCard{
+		{
+			Name:         "Agent A1",
+			Type:         models.AgentTypeOpenCode,
+			Model:        "gpt-5",
+			Profile:      "primary",
+			State:        models.AgentStateWorking,
+			Confidence:   models.StateConfidenceHigh,
+			Reason:       "Processing queue: update workspace view",
+			QueueLength:  2,
+			LastActivity: timePtr(now.Add(-2 * time.Minute)),
+		},
+		{
+			Name:         "Agent B7",
+			Type:         models.AgentTypeClaudeCode,
+			Model:        "sonnet-4",
+			Profile:      "ops",
+			State:        models.AgentStateAwaitingApproval,
+			Confidence:   models.StateConfidenceMedium,
+			Reason:       "Awaiting approval for file changes",
+			QueueLength:  0,
+			LastActivity: timePtr(now.Add(-12 * time.Minute)),
+		},
+		{
+			Name:         "Agent C3",
+			Type:         models.AgentTypeCodex,
+			Model:        "gpt-5-codex",
+			Profile:      "backup",
+			State:        models.AgentStateIdle,
+			Confidence:   models.StateConfidenceLow,
+			Reason:       "Idle: no queued tasks",
+			QueueLength:  0,
+			LastActivity: timePtr(now.Add(-35 * time.Minute)),
+		},
+	}
+}
+
+func timePtr(value time.Time) *time.Time {
+	return &value
+}
+
+func (m *model) openSearch(target viewID) {
+	m.searchOpen = true
+	m.searchTarget = target
+	switch target {
+	case viewWorkspace:
+		if m.workspaceGrid != nil {
+			m.searchQuery = m.workspaceGrid.Filter
+		}
+	case viewAgent:
+		m.searchQuery = m.agentFilter
+	}
+	m.applySearchQuery()
+}
+
+func (m *model) closeSearch() {
+	m.searchOpen = false
+	m.searchQuery = ""
+}
+
+func (m *model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.closeSearch()
+		return m, nil
+	case "enter":
+		m.closeSearch()
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+
+	switch msg.Type {
+	case tea.KeyRunes:
+		m.searchQuery += string(msg.Runes)
+	case tea.KeyBackspace, tea.KeyDelete:
+		m.searchQuery = trimLastRune(m.searchQuery)
+	}
+
+	m.applySearchQuery()
+	return m, nil
+}
+
+func (m *model) applySearchQuery() {
+	switch m.searchTarget {
+	case viewWorkspace:
+		if m.workspaceGrid != nil {
+			m.workspaceGrid.SetFilter(m.searchQuery)
+		}
+	case viewAgent:
+		m.agentFilter = m.searchQuery
+	}
+}
+
+func (m model) searchLine(target viewID) string {
+	var query string
+	switch target {
+	case viewWorkspace:
+		if m.workspaceGrid != nil {
+			query = m.workspaceGrid.Filter
+		}
+	case viewAgent:
+		query = m.agentFilter
+	}
+	if target == viewWorkspace && !(m.searchOpen && m.searchTarget == target) {
+		return ""
+	}
+	label := "Filter:"
+	style := m.styles.Muted
+	if m.searchOpen && m.searchTarget == target {
+		label = "Search:"
+		style = m.styles.Info
+	}
+	if strings.TrimSpace(query) == "" && label == "Filter:" {
+		return ""
+	}
+	return style.Render(fmt.Sprintf("%s %s", label, query))
+}
+
+func filterAgentCards(cards []components.AgentCard, query string) []components.AgentCard {
+	if strings.TrimSpace(query) == "" {
+		return cards
+	}
+	filtered := make([]components.AgentCard, 0, len(cards))
+	for _, card := range cards {
+		if matchesSearch(query, agentCardHaystack(card)) {
+			filtered = append(filtered, card)
+		}
+	}
+	return filtered
+}
+
+func agentCardHaystack(card components.AgentCard) string {
+	return strings.ToLower(strings.Join([]string{
+		card.Name,
+		string(card.Type),
+		card.Model,
+		card.Profile,
+	}, " "))
+}
+
+func matchesSearch(query, haystack string) bool {
+	query = strings.TrimSpace(strings.ToLower(query))
+	if query == "" {
+		return true
+	}
+	tokens := strings.Fields(query)
+	for _, token := range tokens {
+		if strings.Contains(haystack, token) {
+			continue
+		}
+		if !fuzzyMatch(haystack, token) {
+			return false
+		}
+	}
+	return true
+}
+
+func fuzzyMatch(haystack, token string) bool {
+	if token == "" {
+		return true
+	}
+	haystack = strings.ToLower(haystack)
+	token = strings.ToLower(strings.ReplaceAll(token, " ", ""))
+	if token == "" {
+		return true
+	}
+	needle := []rune(token)
+	matchIdx := 0
+	for _, r := range []rune(haystack) {
+		if r == needle[matchIdx] {
+			matchIdx++
+			if matchIdx == len(needle) {
+				return true
+			}
+		}
+	}
+	return false
 }
