@@ -83,6 +83,7 @@ swarm node exec <name-or-id> -- uname -a
 Notes:
 - `swarm node bootstrap` exists but only reports missing deps today.
 - Use `--no-test` on `node add` to skip connection test.
+- `node add` supports per-node SSH preferences (backend, timeout, proxy jump, control master) via flags.
 
 ### `swarm ws`
 
@@ -102,6 +103,8 @@ swarm ws refresh [id-or-name]
 Notes:
 - `ws remove --destroy` kills the tmux session after removing the workspace.
 - Use `ws create --no-tmux` to track an existing session without creating one.
+- If multiple repo roots are detected during `ws import`, pass `--repo-path` to select the correct root.
+- New workspaces create a tmux session with window 0/pane 0 reserved for human interaction; agents are spawned in the `agents` window.
 
 ### `swarm agent`
 
@@ -127,6 +130,18 @@ Notes:
 - `agent send` preserves newlines when using `--file`, `--stdin`, or `--editor`.
 - `agent send --skip-idle-check` bypasses the idle requirement.
 
+### `swarm accounts`
+
+Manage provider accounts and cooldowns.
+
+```bash
+swarm accounts list
+swarm accounts cooldown list
+swarm accounts cooldown set <account> --until 30m
+swarm accounts cooldown clear <account>
+swarm accounts rotate <agent-id> --reason manual
+```
+
 ### `swarm export`
 
 Export Swarm status.
@@ -136,6 +151,16 @@ swarm export status --json
 ```
 
 Human mode prints a summary; JSON/JSONL return full payloads.
+
+### `swarm export events`
+
+Export the event log with optional filters.
+
+```bash
+swarm export events --since 1h --jsonl
+swarm export events --type agent.state_changed,node.online --jsonl
+swarm export events --watch --jsonl
+```
 
 ## Planned commands
 
@@ -147,13 +172,10 @@ These are defined in the product spec but not wired up yet.
 swarm agent approve <agent-id> [--all]
 ```
 
-### `swarm accounts`
+### `swarm accounts add`
 
 ```bash
-swarm accounts list
 swarm accounts add
-swarm accounts rotate
-swarm accounts cooldown list|set|clear
 ```
 
 ### `swarm ws kill` / `swarm ws unmanage`
