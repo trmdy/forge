@@ -161,7 +161,9 @@ Export the event log with optional filters.
 
 ```bash
 swarm export events --since 1h --jsonl
+swarm export events --since 1h --until now --jsonl
 swarm export events --type agent.state_changed,node.online --jsonl
+swarm export events --agent <agent-id> --jsonl
 swarm export events --watch --jsonl
 ```
 

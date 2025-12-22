@@ -402,6 +402,10 @@ func ParseSince(s string) (*time.Time, error) {
 	}
 
 	s = strings.TrimSpace(s)
+	if strings.EqualFold(s, "now") {
+		t := time.Now().UTC()
+		return &t, nil
+	}
 
 	// Try parsing as a duration with optional 'd' for days
 	if dur, err := parseDurationWithDays(s); err == nil {

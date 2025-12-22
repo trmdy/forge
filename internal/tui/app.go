@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -108,12 +109,15 @@ type model struct {
 	agentLast             map[string]time.Time
 	agentCooldowns        map[string]time.Time
 	agentRecentEvents     map[string][]time.Time // Recent state change timestamps per agent
+	workspaceRecentEvents map[string][]time.Time // Recent state change timestamps per workspace
+	agentWorkspaces       map[string]string      // Cached workspace IDs per agent
 	stateChanges          []StateChangeMsg
 	nodes                 []nodeSummary
 	nodesPreview          bool
 	workspacesPreview     bool
 	workspaceGrid         *components.WorkspaceGrid
 	selectedWsID          string // Selected workspace ID for drill-down
+	pulseFrame            int
 	transcriptViewer      *components.TranscriptViewer
 	transcriptPreview     bool
 	showTranscript        bool
@@ -171,6 +175,7 @@ const (
 	minHeight           = 15
 	staleAfter          = 30 * time.Second
 	statusToastDuration = 5 * time.Second
+	maxWorkspaceEvents  = 20
 )
 
 func initialModel() model {
@@ -184,26 +189,28 @@ func initialModel() model {
 	queueEditors := sampleQueueEditors()
 	approvals := sampleApprovals()
 	return model{
-		styles:               styles.DefaultStyles(),
-		view:                 viewDashboard,
-		selectedView:         viewDashboard,
-		lastUpdated:          now,
-		selectedAgentIndex:   -1,
-		agentStates:          make(map[string]models.AgentState),
-		agentInfo:            make(map[string]models.StateInfo),
-		agentLast:            make(map[string]time.Time),
-		agentCooldowns:       make(map[string]time.Time),
-		agentRecentEvents:    make(map[string][]time.Time),
-		stateChanges:         make([]StateChangeMsg, 0),
-		nodes:                sampleNodes(),
-		nodesPreview:         true,
-		workspaceGrid:        grid,
-		workspacesPreview:    true,
-		queueEditors:         queueEditors,
-		approvalsByWorkspace: approvals,
-		transcriptViewer:     tv,
-		transcriptPreview:    true,
-		transcriptAutoScroll: true,
+		styles:                styles.DefaultStyles(),
+		view:                  viewDashboard,
+		selectedView:          viewDashboard,
+		lastUpdated:           now,
+		selectedAgentIndex:    -1,
+		agentStates:           make(map[string]models.AgentState),
+		agentInfo:             make(map[string]models.StateInfo),
+		agentLast:             make(map[string]time.Time),
+		agentCooldowns:        make(map[string]time.Time),
+		agentRecentEvents:     make(map[string][]time.Time),
+		workspaceRecentEvents: make(map[string][]time.Time),
+		agentWorkspaces:       make(map[string]string),
+		stateChanges:          make([]StateChangeMsg, 0),
+		nodes:                 sampleNodes(),
+		nodesPreview:          true,
+		workspaceGrid:         grid,
+		workspacesPreview:     true,
+		queueEditors:          queueEditors,
+		approvalsByWorkspace:  approvals,
+		transcriptViewer:      tv,
+		transcriptPreview:     true,
+		transcriptAutoScroll:  true,
 	}
 }
 
@@ -464,6 +471,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			events = events[1:]
 		}
 		m.agentRecentEvents[msg.AgentID] = events
+		m.recordWorkspaceActivity(msg.AgentID, activityAt)
 
 		// Keep recent state changes for display (max 10)
 		m.stateChanges = append(m.stateChanges, msg)
@@ -482,6 +490,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stale = true
 		}
 	case toastTickMsg:
+		m.pulseFrame++
 		if strings.TrimSpace(m.statusMsg) != "" && !m.statusExpiresAt.IsZero() && time.Now().After(m.statusExpiresAt) {
 			m.statusMsg = ""
 			m.statusSeverity = statusInfo
@@ -612,6 +621,8 @@ func (m *model) viewLines() []string {
 		if m.workspaceGrid != nil {
 			m.workspaceGrid.Width = mainWidth
 			m.workspaceGrid.Height = m.height - 10 // Reserve space for header/footer
+			m.workspaceGrid.PulseFrame = m.pulseFrame
+			m.workspaceGrid.PulseEvents = m.workspaceRecentEvents
 		}
 
 		lines := []string{
@@ -1045,6 +1056,49 @@ func (m model) selectedAgentIndexFor(cards []components.AgentCard) int {
 func (m *model) syncAgentSelection() {
 	cards := m.agentCards()
 	m.ensureAgentSelection(cards)
+}
+
+func (m *model) recordWorkspaceActivity(agentID string, timestamp time.Time) {
+	if timestamp.IsZero() {
+		return
+	}
+	wsID := m.workspaceIDForAgent(agentID)
+	if wsID == "" {
+		return
+	}
+	if m.workspaceRecentEvents == nil {
+		m.workspaceRecentEvents = make(map[string][]time.Time)
+	}
+	events := m.workspaceRecentEvents[wsID]
+	events = append(events, timestamp)
+	if len(events) > maxWorkspaceEvents {
+		events = events[len(events)-maxWorkspaceEvents:]
+	}
+	m.workspaceRecentEvents[wsID] = events
+}
+
+func (m *model) workspaceIDForAgent(agentID string) string {
+	if m.agentWorkspaces == nil {
+		m.agentWorkspaces = make(map[string]string)
+	}
+	if wsID := m.agentWorkspaces[agentID]; wsID != "" {
+		return wsID
+	}
+	if m.stateEngine == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	agent, err := m.stateEngine.GetAgent(ctx, agentID)
+	if err != nil || agent == nil {
+		return ""
+	}
+	wsID := strings.TrimSpace(agent.WorkspaceID)
+	if wsID == "" {
+		return ""
+	}
+	m.agentWorkspaces[agentID] = wsID
+	return wsID
 }
 
 func (m *model) ensureAgentSelection(cards []components.AgentCard) {

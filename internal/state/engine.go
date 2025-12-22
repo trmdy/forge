@@ -114,6 +114,18 @@ func (e *Engine) GetState(ctx context.Context, agentID string) (*models.StateInf
 	return &agent.StateInfo, nil
 }
 
+// GetAgent retrieves the full agent record by ID.
+func (e *Engine) GetAgent(ctx context.Context, agentID string) (*models.Agent, error) {
+	agent, err := e.repo.Get(ctx, agentID)
+	if err != nil {
+		if errors.Is(err, db.ErrAgentNotFound) {
+			return nil, ErrAgentNotFound
+		}
+		return nil, err
+	}
+	return agent, nil
+}
+
 // UpdateState updates an agent's state and notifies subscribers.
 func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.AgentState, info models.StateInfo, usage *models.UsageMetrics, diff *models.DiffMetadata) error {
 	agent, err := e.repo.Get(ctx, agentID)

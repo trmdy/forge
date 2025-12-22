@@ -21,6 +21,8 @@ func init() {
 	exportCmd.AddCommand(exportEventsCmd)
 
 	exportEventsCmd.Flags().StringVar(&exportEventsTypes, "type", "", "filter by event type (comma-separated)")
+	exportEventsCmd.Flags().StringVar(&exportEventsUntil, "until", "", "filter events before a time (same format as --since)")
+	exportEventsCmd.Flags().StringVar(&exportEventsAgent, "agent", "", "filter by agent ID")
 }
 
 var exportCmd = &cobra.Command{
@@ -68,6 +70,8 @@ var exportStatusCmd = &cobra.Command{
 
 var (
 	exportEventsTypes string
+	exportEventsUntil string
+	exportEventsAgent string
 )
 
 const exportEventsPageSize = 500
@@ -75,7 +79,7 @@ const exportEventsPageSize = 500
 var exportEventsCmd = &cobra.Command{
 	Use:   "events",
 	Short: "Export events",
-	Long:  "Export the event log as JSON or JSONL, optionally filtered by type.",
+	Long:  "Export the event log as JSON or JSONL, optionally filtered by type, time range, or agent.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := MustBeJSONLForWatch(); err != nil {
 			return err
@@ -96,20 +100,37 @@ var exportEventsCmd = &cobra.Command{
 			return err
 		}
 
+		agentID := strings.TrimSpace(exportEventsAgent)
+		var entityTypes []models.EntityType
+		if agentID != "" {
+			entityTypes = []models.EntityType{models.EntityTypeAgent}
+		}
+
 		since, err := GetSinceTime()
 		if err != nil {
 			return fmt.Errorf("invalid --since value: %w", err)
 		}
 
+		until, err := ParseSince(exportEventsUntil)
+		if err != nil {
+			return fmt.Errorf("invalid --until value: %w", err)
+		}
+		if since != nil && until != nil && since.After(*until) {
+			return fmt.Errorf("--since must be before --until")
+		}
+
 		if IsWatchMode() {
-			return StreamEventsWithReplay(ctx, eventRepo, os.Stdout, since, eventTypes, nil, "")
+			if until != nil {
+				return fmt.Errorf("--until cannot be used with --watch")
+			}
+			return StreamEventsWithReplay(ctx, eventRepo, os.Stdout, since, eventTypes, entityTypes, agentID)
 		}
 
 		if IsJSONLOutput() {
-			return streamExportEvents(ctx, eventRepo, since, eventTypes)
+			return streamExportEvents(ctx, eventRepo, since, until, eventTypes, entityTypes, agentID)
 		}
 
-		events, err := collectExportEvents(ctx, eventRepo, since, eventTypes)
+		events, err := collectExportEvents(ctx, eventRepo, since, until, eventTypes, entityTypes, agentID)
 		if err != nil {
 			return err
 		}
@@ -129,8 +150,16 @@ var exportEventsCmd = &cobra.Command{
 	},
 }
 
-func streamExportEvents(ctx context.Context, repo *db.EventRepository, since *time.Time, eventTypes []models.EventType) error {
-	return exportEventsPaginated(ctx, repo, since, eventTypes, func(events []*models.Event) error {
+func streamExportEvents(
+	ctx context.Context,
+	repo *db.EventRepository,
+	since *time.Time,
+	until *time.Time,
+	eventTypes []models.EventType,
+	entityTypes []models.EntityType,
+	entityID string,
+) error {
+	return exportEventsPaginated(ctx, repo, since, until, eventTypes, entityTypes, entityID, func(events []*models.Event) error {
 		if len(events) == 0 {
 			return nil
 		}
@@ -138,9 +167,17 @@ func streamExportEvents(ctx context.Context, repo *db.EventRepository, since *ti
 	})
 }
 
-func collectExportEvents(ctx context.Context, repo *db.EventRepository, since *time.Time, eventTypes []models.EventType) ([]*models.Event, error) {
+func collectExportEvents(
+	ctx context.Context,
+	repo *db.EventRepository,
+	since *time.Time,
+	until *time.Time,
+	eventTypes []models.EventType,
+	entityTypes []models.EntityType,
+	entityID string,
+) ([]*models.Event, error) {
 	var collected []*models.Event
-	err := exportEventsPaginated(ctx, repo, since, eventTypes, func(events []*models.Event) error {
+	err := exportEventsPaginated(ctx, repo, since, until, eventTypes, entityTypes, entityID, func(events []*models.Event) error {
 		if len(events) == 0 {
 			return nil
 		}
@@ -150,17 +187,34 @@ func collectExportEvents(ctx context.Context, repo *db.EventRepository, since *t
 	return collected, err
 }
 
-func exportEventsPaginated(ctx context.Context, repo *db.EventRepository, since *time.Time, eventTypes []models.EventType, handle func([]*models.Event) error) error {
+func exportEventsPaginated(
+	ctx context.Context,
+	repo *db.EventRepository,
+	since *time.Time,
+	until *time.Time,
+	eventTypes []models.EventType,
+	entityTypes []models.EntityType,
+	entityID string,
+	handle func([]*models.Event) error,
+) error {
 	var cursor string
 	for {
 		query := db.EventQuery{
 			Cursor: cursor,
 			Since:  since,
+			Until:  until,
 			Limit:  exportEventsPageSize,
 		}
 		if len(eventTypes) == 1 {
 			eventType := eventTypes[0]
 			query.Type = &eventType
+		}
+		if len(entityTypes) == 1 {
+			entityType := entityTypes[0]
+			query.EntityType = &entityType
+			if strings.TrimSpace(entityID) != "" {
+				query.EntityID = &entityID
+			}
 		}
 
 		page, err := repo.Query(ctx, query)
