@@ -103,3 +103,32 @@ func TestRunDoctorChecks_MissingCLIWarn(t *testing.T) {
 		t.Fatalf("expected cli warn, got %q", cliCheck.Status)
 	}
 }
+
+func TestRunDoctorChecks_TmuxTooOldWarn(t *testing.T) {
+	executor := &fakeExecutor{results: map[string]execResult{
+		"echo ok":             {stdout: "ok"},
+		"tmux -V 2>/dev/null": {stdout: "tmux 2.0"},
+		"df -kP / | tail -1":  {stdout: "overlay 100 10 90 10% /"},
+		"nproc 2>/dev/null || getconf _NPROCESSORS_ONLN": {stdout: "4"},
+		"awk '/MemTotal/ {print $2}' /proc/meminfo":      {stdout: "1048576"},
+		"command -v opencode":                            {stdout: "/usr/bin/opencode"},
+		"command -v claude":                              {stdout: "/usr/bin/claude"},
+		"command -v codex":                               {stdout: "/usr/bin/codex"},
+		"command -v gemini":                              {stdout: "/usr/bin/gemini"},
+	}}
+
+	checks := runDoctorChecks(context.Background(), executor, false)
+	var tmuxCheck *DoctorCheck
+	for i := range checks {
+		if checks[i].Name == "tmux" {
+			tmuxCheck = &checks[i]
+			break
+		}
+	}
+	if tmuxCheck == nil {
+		t.Fatalf("expected tmux check")
+	}
+	if tmuxCheck.Status != CheckWarn {
+		t.Fatalf("expected tmux warn, got %q", tmuxCheck.Status)
+	}
+}

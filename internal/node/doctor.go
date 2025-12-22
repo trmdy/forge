@@ -12,6 +12,7 @@ import (
 
 	"github.com/opencode-ai/swarm/internal/models"
 	"github.com/opencode-ai/swarm/internal/ssh"
+	"github.com/opencode-ai/swarm/internal/tmux"
 )
 
 // CheckStatus indicates the result of a diagnostic check.
@@ -167,6 +168,22 @@ func checkTmux(ctx context.Context, executor execer) DoctorCheck {
 	details := strings.TrimSpace(string(stdout))
 	if details == "" {
 		details = "tmux detected"
+	}
+	version, err := tmux.ParseVersion(details)
+	if err != nil {
+		return DoctorCheck{
+			Name:    "tmux",
+			Status:  CheckWarn,
+			Details: details,
+		}
+	}
+
+	if version.LessThan(tmux.MinVersion) {
+		return DoctorCheck{
+			Name:    "tmux",
+			Status:  CheckWarn,
+			Details: fmt.Sprintf("%s (min %s)", details, tmux.MinVersion.String()),
+		}
 	}
 
 	return DoctorCheck{

@@ -250,34 +250,11 @@ type ConnectionResult struct {
 
 // TestConnection tests SSH connectivity to a node.
 func (s *Service) TestConnection(ctx context.Context, node *models.Node) (*ConnectionResult, error) {
-	if node.IsLocal {
-		// Local node - just return success
-		return &ConnectionResult{
-			Success: true,
-			Metadata: models.NodeMetadata{
-				Platform: "local",
-			},
-		}, nil
-	}
-
-	// Parse SSH target
-	user, host, port := ParseSSHTarget(node.SSHTarget)
-
-	// Build connection options
-	opts := ssh.ConnectionOptions{
-		Host:    host,
-		Port:    port,
-		User:    user,
-		KeyPath: node.SSHKeyPath,
-		Timeout: s.DefaultTimeout,
-	}
-
-	// Create executor based on backend preference
-	executor, err := s.createExecutor(node.SSHBackend, opts)
+	executor, err := s.executorForNode(node)
 	if err != nil {
 		return &ConnectionResult{
 			Success: false,
-			Error:   fmt.Sprintf("failed to create SSH executor: %v", err),
+			Error:   fmt.Sprintf("failed to create executor: %v", err),
 		}, nil
 	}
 	defer executor.Close()
@@ -307,8 +284,41 @@ func (s *Service) TestConnection(ctx context.Context, node *models.Node) (*Conne
 
 	// Gather metadata
 	result.Metadata = s.gatherNodeMetadata(ctx, executor)
+	if node.IsLocal {
+		result.Metadata.Platform = "local"
+	}
 
 	return result, nil
+}
+
+func (s *Service) executorForNode(node *models.Node) (ssh.Executor, error) {
+	if node.IsLocal {
+		return ssh.NewLocalExecutor(), nil
+	}
+
+	// Parse SSH target
+	user, host, port := ParseSSHTarget(node.SSHTarget)
+
+	// Build connection options
+	opts := ssh.ConnectionOptions{
+		Host:    host,
+		Port:    port,
+		User:    user,
+		KeyPath: node.SSHKeyPath,
+		Timeout: s.DefaultTimeout,
+
+		AgentForwarding: node.SSHAgentForwarding,
+		ProxyJump:       node.SSHProxyJump,
+		ControlMaster:   node.SSHControlMaster,
+		ControlPath:     node.SSHControlPath,
+		ControlPersist:  node.SSHControlPersist,
+	}
+	if node.SSHTimeoutSeconds > 0 {
+		opts.Timeout = time.Duration(node.SSHTimeoutSeconds) * time.Second
+	}
+
+	// Create executor based on backend preference
+	return s.createExecutor(node.SSHBackend, opts)
 }
 
 // RefreshNodeStatus tests connectivity and updates the node's status.
@@ -453,44 +463,9 @@ type ExecResult struct {
 
 // ExecCommand executes a command on a node and returns the result.
 func (s *Service) ExecCommand(ctx context.Context, node *models.Node, cmd string) (*ExecResult, error) {
-	if node.IsLocal {
-		// For local nodes, use system executor with localhost
-		executor := ssh.NewSystemExecutor(ssh.ConnectionOptions{})
-		stdout, stderr, err := executor.Exec(ctx, cmd)
-		result := &ExecResult{
-			Stdout:   string(stdout),
-			Stderr:   string(stderr),
-			ExitCode: 0,
-		}
-		if err != nil {
-			result.Error = err.Error()
-			// Try to extract exit code from error
-			var exitErr *ssh.ExitError
-			if errors.As(err, &exitErr) {
-				result.ExitCode = exitErr.Code
-			} else {
-				result.ExitCode = 1
-			}
-		}
-		return result, nil
-	}
-
-	// Parse SSH target
-	user, host, port := ParseSSHTarget(node.SSHTarget)
-
-	// Build connection options
-	opts := ssh.ConnectionOptions{
-		Host:    host,
-		Port:    port,
-		User:    user,
-		KeyPath: node.SSHKeyPath,
-		Timeout: s.DefaultTimeout,
-	}
-
-	// Create executor based on backend preference
-	executor, err := s.createExecutor(node.SSHBackend, opts)
+	executor, err := s.executorForNode(node)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create SSH executor: %w", err)
+		return nil, fmt.Errorf("failed to create executor: %w", err)
 	}
 	defer executor.Close()
 
