@@ -45,10 +45,7 @@ It provides:
 Run 'swarm' without arguments to launch the TUI dashboard.`,
 	// Default action is to launch TUI
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// TODO: Launch TUI
-		cmd.Println("Swarm TUI - Coming soon!")
-		cmd.Println("Use 'swarm --help' to see available commands.")
-		return nil
+		return runTUI()
 	},
 }
 
