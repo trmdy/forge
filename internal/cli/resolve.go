@@ -138,6 +138,39 @@ func findAgent(ctx context.Context, repo *db.AgentRepository, idOrPrefix string)
 	return nil, fmt.Errorf("agent '%s' not found. %s", idOrPrefix, example)
 }
 
+func findAccount(ctx context.Context, repo *db.AccountRepository, idOrProfile string) (*models.Account, error) {
+	if strings.TrimSpace(idOrProfile) == "" {
+		return nil, errors.New("account ID or profile name required")
+	}
+
+	account, err := repo.Get(ctx, idOrProfile)
+	if err == nil {
+		return account, nil
+	}
+	if !errors.Is(err, db.ErrAccountNotFound) {
+		return nil, fmt.Errorf("failed to get account: %w", err)
+	}
+
+	accounts, err := repo.List(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list accounts: %w", err)
+	}
+
+	matches := matchAccounts(accounts, idOrProfile)
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("account '%s' is ambiguous; matches: %s (use a longer prefix or full ID)", idOrProfile, formatAccountMatches(matches))
+	}
+	if len(accounts) == 0 {
+		return nil, fmt.Errorf("account '%s' not found (no accounts configured yet)", idOrProfile)
+	}
+
+	example := fmt.Sprintf("Example input: '%s' or '%s'", accounts[0].ProfileName, shortID(accounts[0].ID))
+	return nil, fmt.Errorf("account '%s' not found. %s", idOrProfile, example)
+}
+
 func matchNodes(nodes []*models.Node, query string) []*models.Node {
 	normalized := strings.ToLower(strings.TrimSpace(query))
 	if normalized == "" {
@@ -220,6 +253,47 @@ func matchWorkspaces(workspaces []*models.Workspace, query string) []*models.Wor
 	return matches
 }
 
+func matchAccounts(accounts []*models.Account, query string) []*models.Account {
+	normalized := strings.ToLower(strings.TrimSpace(query))
+	if normalized == "" {
+		return nil
+	}
+
+	matches := make([]*models.Account, 0)
+	seen := make(map[string]struct{})
+
+	for _, account := range accounts {
+		if account == nil {
+			continue
+		}
+		if strings.HasPrefix(account.ID, query) {
+			if _, ok := seen[account.ID]; !ok {
+				matches = append(matches, account)
+				seen[account.ID] = struct{}{}
+			}
+			continue
+		}
+		name := strings.ToLower(account.ProfileName)
+		if strings.HasPrefix(name, normalized) || (len(normalized) >= 3 && strings.Contains(name, normalized)) {
+			if _, ok := seen[account.ID]; !ok {
+				matches = append(matches, account)
+				seen[account.ID] = struct{}{}
+			}
+		}
+	}
+
+	sort.Slice(matches, func(i, j int) bool {
+		left := strings.ToLower(matches[i].ProfileName)
+		right := strings.ToLower(matches[j].ProfileName)
+		if left == right {
+			return matches[i].ID < matches[j].ID
+		}
+		return left < right
+	})
+
+	return matches
+}
+
 func matchAgents(agents []*models.Agent, query string) []*models.Agent {
 	normalized := strings.TrimSpace(query)
 	if normalized == "" {
@@ -266,6 +340,13 @@ func formatAgentMatches(agents []*models.Agent) string {
 		}
 		descriptor += ")"
 		return descriptor
+	})
+}
+
+func formatAccountMatches(accounts []*models.Account) string {
+	return formatMatchList(len(accounts), func(i int) string {
+		account := accounts[i]
+		return fmt.Sprintf("%s (%s)", account.ProfileName, shortID(account.ID))
 	})
 }
 

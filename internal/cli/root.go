@@ -13,16 +13,17 @@ import (
 
 var (
 	// Global flags
-	cfgFile     string
-	jsonOutput  bool
-	jsonlOutput bool
-	watchMode   bool
-	sinceDur    string
-	verbose     bool
-	noColor     bool
-	noProgress  bool
-	logLevel    string
-	logFormat   string
+	cfgFile        string
+	jsonOutput     bool
+	jsonlOutput    bool
+	watchMode      bool
+	sinceDur       string
+	verbose        bool
+	noColor        bool
+	noProgress     bool
+	nonInteractive bool
+	logLevel       string
+	logFormat      string
 
 	// Global config loader and config
 	configLoader *config.Loader
@@ -76,6 +77,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose output")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output")
 	rootCmd.PersistentFlags().BoolVar(&noProgress, "no-progress", false, "disable progress output")
+	rootCmd.PersistentFlags().BoolVar(&nonInteractive, "non-interactive", false, "run without prompts, use defaults")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "override logging level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "", "override logging format (json, console)")
 }

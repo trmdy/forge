@@ -23,10 +23,10 @@ var uiCmd = &cobra.Command{
 }
 
 func runTUI() error {
-	if !hasTTY() {
+	if IsNonInteractive() {
 		return &PreflightError{
 			Message:  "TUI requires an interactive terminal",
-			Hint:     "Run in a terminal or use CLI subcommands",
+			Hint:     "Run without --non-interactive and with a TTY, or use CLI subcommands",
 			NextStep: "swarm --help",
 		}
 	}

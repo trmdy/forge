@@ -125,7 +125,8 @@ By default, a tmux session is created in the repository directory.`,
 		nodeService := node.NewService(nodeRepo)
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		eventRepo := db.NewEventRepository(database)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithEventRepository(eventRepo))
 
 		// Resolve node ID if name provided
 		nodeID := ""
@@ -200,7 +201,8 @@ This allows Swarm to manage agents in sessions created outside of Swarm.`,
 		nodeService := node.NewService(nodeRepo)
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		eventRepo := db.NewEventRepository(database)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithEventRepository(eventRepo))
 
 		// Resolve node
 		n, err := findNode(ctx, nodeService, wsImportNode)
@@ -409,6 +411,9 @@ var wsStatusCmd = &cobra.Command{
 		fmt.Printf("  Active:  %d\n", status.ActiveAgents)
 		fmt.Printf("  Idle:    %d\n", status.IdleAgents)
 		fmt.Printf("  Blocked: %d\n", status.BlockedAgents)
+		if status.Pulse != nil && status.Pulse.Sparkline != "" {
+			fmt.Printf("  Pulse:   %s (last %dm)\n", status.Pulse.Sparkline, status.Pulse.WindowMinutes)
+		}
 
 		if len(status.Alerts) > 0 {
 			fmt.Println()
@@ -661,7 +666,7 @@ and removing the Swarm record.`,
 		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
 
 		tmuxClient := tmux.NewLocalClient()
-		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient)
+		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
 
 		ws, err := findWorkspace(ctx, wsRepo, idOrName)
 		if err != nil {

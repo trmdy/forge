@@ -3,13 +3,17 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/opencode-ai/swarm/internal/db"
 	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/opencode-ai/swarm/internal/node"
+	"github.com/opencode-ai/swarm/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -58,11 +62,53 @@ func runPreflight(cmd *cobra.Command) error {
 	if err := checkDatabase(ctx); err != nil {
 		return err
 	}
+	maybeAutoImportWorkspaces(ctx)
 	if err := checkWorkspacePath(cmd); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func maybeAutoImportWorkspaces(ctx context.Context) {
+	if appConfig == nil || !appConfig.WorkspaceDefaults.AutoImportExisting {
+		return
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		return
+	}
+
+	database, err := openDatabase()
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to open database for auto-import")
+		return
+	}
+	defer database.Close()
+
+	nodeRepo := db.NewNodeRepository(database)
+	nodeService := node.NewService(nodeRepo)
+	wsRepo := db.NewWorkspaceRepository(database)
+	agentRepo := db.NewAgentRepository(database)
+	wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+
+	report, err := wsService.RecoverOrphanedSessions(ctx, "", appConfig.WorkspaceDefaults.TmuxPrefix)
+	if err != nil {
+		if errors.Is(err, workspace.ErrNodeNotFound) {
+			return
+		}
+		logger.Warn().Err(err).Msg("failed to auto-import existing tmux sessions")
+		return
+	}
+	if report == nil {
+		return
+	}
+
+	if imported := len(report.Imported); imported > 0 {
+		logger.Info().Int("count", imported).Msg("imported existing tmux sessions")
+	}
+	if failed := len(report.Failures); failed > 0 {
+		logger.Warn().Int("count", failed).Msg("some tmux sessions failed to import")
+	}
 }
 
 func shouldRunPreflight(cmd *cobra.Command) bool {
