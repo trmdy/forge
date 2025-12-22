@@ -153,13 +153,13 @@ func (e *Engine) DetectState(ctx context.Context, agentID string) (*DetectionRes
 	}
 
 	// Capture the current screen
-	screen, err := e.tmuxClient.CapturePane(ctx, agent.TmuxPane, false)
+	snapshot, err := CaptureSnapshot(ctx, e.tmuxClient, agent.TmuxPane, false)
 	if err != nil {
 		return nil, err
 	}
 
-	// Calculate screen hash for change detection
-	screenHash := tmux.HashSnapshot(screen)
+	screen := snapshot.Content
+	screenHash := snapshot.Hash
 
 	// Get the appropriate adapter
 	adapter := e.registry.GetByAgentType(agent.Type)
@@ -179,13 +179,17 @@ func (e *Engine) DetectState(ctx context.Context, agentID string) (*DetectionRes
 		return nil, err
 	}
 
-	return &DetectionResult{
+	result := &DetectionResult{
 		State:      state,
 		Confidence: reason.Confidence,
 		Reason:     reason.Reason,
 		Evidence:   reason.Evidence,
 		ScreenHash: screenHash,
-	}, nil
+	}
+
+	// Apply rule-based inference on top of adapter result when needed.
+	ApplyRuleBasedInference(result, screen)
+	return result, nil
 }
 
 // DetectAndUpdate detects the current state and updates the agent.
