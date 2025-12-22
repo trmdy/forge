@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/opencode-ai/swarm/internal/db"
+	"github.com/opencode-ai/swarm/internal/events"
 	"github.com/opencode-ai/swarm/internal/logging"
 	"github.com/opencode-ai/swarm/internal/models"
 	"github.com/opencode-ai/swarm/internal/node"
@@ -28,17 +29,32 @@ type Service struct {
 	repo        *db.WorkspaceRepository
 	nodeService *node.Service
 	agentRepo   *db.AgentRepository
+	publisher   events.Publisher
 	logger      zerolog.Logger
 }
 
+// ServiceOption configures a WorkspaceService.
+type ServiceOption func(*Service)
+
+// WithPublisher sets the event publisher for the service.
+func WithPublisher(publisher events.Publisher) ServiceOption {
+	return func(s *Service) {
+		s.publisher = publisher
+	}
+}
+
 // NewService creates a new WorkspaceService.
-func NewService(repo *db.WorkspaceRepository, nodeService *node.Service, agentRepo *db.AgentRepository) *Service {
-	return &Service{
+func NewService(repo *db.WorkspaceRepository, nodeService *node.Service, agentRepo *db.AgentRepository, opts ...ServiceOption) *Service {
+	s := &Service{
 		repo:        repo,
 		nodeService: nodeService,
 		agentRepo:   agentRepo,
 		logger:      logging.Component("workspace"),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // CreateWorkspaceInput contains the parameters for creating a workspace.
@@ -153,6 +169,9 @@ func (s *Service) CreateWorkspace(ctx context.Context, input CreateWorkspaceInpu
 		Str("tmux_session", workspace.TmuxSession).
 		Msg("workspace created")
 
+	// Emit event
+	s.publishEvent(ctx, models.EventTypeWorkspaceCreated, workspace.ID, nil)
+
 	return workspace, nil
 }
 
@@ -223,6 +242,9 @@ func (s *Service) ImportWorkspace(ctx context.Context, input ImportWorkspaceInpu
 		Str("name", workspace.Name).
 		Str("tmux_session", workspace.TmuxSession).
 		Msg("workspace imported")
+
+	// Emit event
+	s.publishEvent(ctx, models.EventTypeWorkspaceImported, workspace.ID, nil)
 
 	return workspace, nil
 }
@@ -459,6 +481,10 @@ func (s *Service) UnmanageWorkspace(ctx context.Context, id string) error {
 	}
 
 	s.logger.Info().Str("workspace_id", id).Msg("workspace unmanaged")
+
+	// Emit event
+	s.publishEvent(ctx, models.EventTypeWorkspaceUnmanaged, id, nil)
+
 	return nil
 }
 
@@ -509,6 +535,9 @@ func (s *Service) DestroyWorkspace(ctx context.Context, id string) error {
 		Str("tmux_session", workspace.TmuxSession).
 		Msg("workspace destroyed")
 
+	// Emit event
+	s.publishEvent(ctx, models.EventTypeWorkspaceDestroyed, id, nil)
+
 	return nil
 }
 
@@ -557,4 +586,19 @@ func (s *Service) isTmuxSessionActive(ctx context.Context, nodeObj *models.Node,
 	}
 
 	return exists
+}
+
+// publishEvent publishes an event if a publisher is configured.
+func (s *Service) publishEvent(ctx context.Context, eventType models.EventType, workspaceID string, payload any) {
+	if s.publisher == nil {
+		return
+	}
+
+	event := &models.Event{
+		Type:       eventType,
+		EntityType: models.EntityTypeWorkspace,
+		EntityID:   workspaceID,
+	}
+
+	s.publisher.Publish(ctx, event)
 }
