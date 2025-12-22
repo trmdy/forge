@@ -92,6 +92,9 @@ type model struct {
 	queueEditBuffer       string
 	queueEditIndex        int
 	queueEditAgent        string
+	queueEditMode         queueEditMode
+	queueEditKind         models.QueueItemType
+	queueEditPrompt       string
 	transcriptSearchOpen  bool
 	transcriptSearchQuery string
 	paletteOpen           bool
@@ -138,6 +141,13 @@ type queueItem struct {
 	Summary string
 	Status  models.QueueItemStatus
 }
+
+type queueEditMode int
+
+const (
+	queueEditModeEdit queueEditMode = iota
+	queueEditModeAdd
+)
 
 type queueEditorState struct {
 	Items    []queueItem
@@ -1144,8 +1154,8 @@ func (m model) queueEditorLines() []string {
 
 	lines := []string{
 		m.styles.Text.Render("Queue editor"),
-		m.styles.Muted.Render("↑↓/jk: move | J/K: reorder | e: edit | d: delete"),
-		m.styles.Muted.Render("m: add msg | p: add pause | esc: close"),
+		m.styles.Muted.Render("↑↓/jk: move | J/K or Ctrl+↑/↓: reorder | e: edit | d: delete"),
+		m.styles.Muted.Render("m: add msg | p: add pause | c: add conditional | esc: close"),
 		m.styles.Muted.Render(fmt.Sprintf("Agent: %s", agent)),
 	}
 
@@ -1203,8 +1213,18 @@ func (m model) queueEditLines() []string {
 	if buffer == "" {
 		buffer = "..."
 	}
+	label := "Edit"
+	if m.queueEditMode == queueEditModeAdd {
+		label = "Add"
+	}
+	prompt := strings.TrimSpace(m.queueEditPrompt)
+	if prompt == "" {
+		prompt = label
+	} else {
+		prompt = fmt.Sprintf("%s: %s", label, prompt)
+	}
 	return []string{
-		m.styles.Info.Render(fmt.Sprintf("Edit: %s", buffer)),
+		m.styles.Info.Render(fmt.Sprintf("%s: %s", prompt, buffer)),
 		m.styles.Muted.Render("enter: save | esc: cancel"),
 	}
 }
@@ -1421,11 +1441,12 @@ func (m model) agentDetailView() []string {
 	// Left panel: Transcript
 	transcriptPanel := m.renderAgentDetailTranscript(leftWidth)
 
-	// Right panel: Profile + Queue + Activity
+	// Right panel: Profile + Usage + Queue + Activity
 	profilePanel := m.renderAgentDetailProfile(card, rightWidth)
+	usagePanel := m.renderAgentDetailUsage(card, rightWidth)
 	queuePanel := m.renderAgentDetailQueue(card, rightWidth)
 	activityPanel := m.renderAgentDetailActivity(card, rightWidth)
-	rightPanels := joinLines([]string{profilePanel, "", queuePanel, "", activityPanel})
+	rightPanels := joinLines([]string{profilePanel, "", usagePanel, "", queuePanel, "", activityPanel})
 
 	// Join panels horizontally
 	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, transcriptPanel, "  ", rightPanels)
@@ -1579,6 +1600,18 @@ func (m model) renderAgentDetailActivity(card *components.AgentCard, width int) 
 	lines = append(lines, "", fmt.Sprintf("Activity: %s", sparkline))
 
 	return m.renderPanel("Recent Activity", width, lines)
+}
+
+// renderAgentDetailUsage renders the usage panel for agent detail view.
+func (m model) renderAgentDetailUsage(card *components.AgentCard, width int) string {
+	data := components.UsagePanelData{
+		Metrics:   card.UsageMetrics,
+		AgentName: card.Name,
+	}
+	if card.UsageMetrics != nil {
+		data.UpdatedAt = card.UsageMetrics.UpdatedAt
+	}
+	return components.RenderUsagePanel(m.styles, data, width)
 }
 
 // Helper functions for agent detail view
@@ -2604,6 +2637,21 @@ func sampleAgentCards() []components.AgentCard {
 				now.Add(-3 * time.Minute),
 				now.Add(-5 * time.Minute),
 			},
+			UsageMetrics: &models.UsageMetrics{
+				TotalCostCents:      12300,
+				AvgCostPerDayCents:  6100,
+				InputTokens:         45000,
+				OutputTokens:        12000,
+				CacheReadTokens:     8000,
+				CacheWriteTokens:    2000,
+				TotalTokens:         67000,
+				Sessions:            25,
+				Messages:            180,
+				Days:                3,
+				AvgTokensPerSession: 2680,
+				Source:              "opencode.stats",
+				UpdatedAt:           now.Add(-5 * time.Minute),
+			},
 		},
 		{
 			Name:         "Agent B7",
@@ -2923,6 +2971,16 @@ func (m *model) updateQueueEditor(msg tea.KeyMsg) (bool, tea.Cmd) {
 			m.moveQueueItem(state, 1)
 		}
 		return true, nil
+	case "ctrl+up", "ctrl+left":
+		if state != nil {
+			m.moveQueueItem(state, -1)
+		}
+		return true, nil
+	case "ctrl+down", "ctrl+right":
+		if state != nil {
+			m.moveQueueItem(state, 1)
+		}
+		return true, nil
 	case "d":
 		if state != nil {
 			m.deleteQueueItem(state)
@@ -2939,7 +2997,14 @@ func (m *model) updateQueueEditor(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 	case "p":
 		if state != nil {
-			m.addQueueItem(state, models.QueueItemTypePause, "Pause 5m (manual)")
+			m.openQueueAdd(agent, state, models.QueueItemTypePause, "Pause duration (e.g., 5m)", "5m")
+		} else {
+			m.setStatus("No agent selected.", statusWarn)
+		}
+		return true, nil
+	case "c":
+		if state != nil {
+			m.openQueueAdd(agent, state, models.QueueItemTypeConditional, "Condition (e.g., after_cooldown)", "after_cooldown")
 		} else {
 			m.setStatus("No agent selected.", statusWarn)
 		}
@@ -3013,6 +3078,33 @@ func (m *model) openQueueEdit(state *queueEditorState, agent string) {
 	m.queueEditAgent = agent
 	m.queueEditIndex = state.Selected
 	m.queueEditBuffer = state.Items[state.Selected].Summary
+	m.queueEditMode = queueEditModeEdit
+	m.queueEditKind = state.Items[state.Selected].Kind
+	m.queueEditPrompt = "Item summary"
+}
+
+func (m *model) openQueueAdd(agent string, state *queueEditorState, kind models.QueueItemType, prompt string, placeholder string) {
+	if strings.TrimSpace(agent) == "" {
+		m.setStatus("No agent selected.", statusWarn)
+		return
+	}
+	insertIndex := 0
+	if state != nil && len(state.Items) > 0 {
+		if state.Selected < 0 || state.Selected >= len(state.Items) {
+			state.Selected = 0
+		}
+		insertIndex = state.Selected + 1
+		if insertIndex > len(state.Items) {
+			insertIndex = len(state.Items)
+		}
+	}
+	m.queueEditOpen = true
+	m.queueEditAgent = agent
+	m.queueEditIndex = insertIndex
+	m.queueEditBuffer = placeholder
+	m.queueEditMode = queueEditModeAdd
+	m.queueEditKind = kind
+	m.queueEditPrompt = prompt
 }
 
 func (m *model) closeQueueEdit() {
@@ -3020,16 +3112,19 @@ func (m *model) closeQueueEdit() {
 	m.queueEditAgent = ""
 	m.queueEditIndex = 0
 	m.queueEditBuffer = ""
+	m.queueEditMode = queueEditModeEdit
+	m.queueEditKind = ""
+	m.queueEditPrompt = ""
 }
 
 func (m *model) applyQueueEdit() {
 	state := m.ensureQueueEditorState(m.queueEditAgent)
-	if state == nil || len(state.Items) == 0 {
+	if state == nil {
 		m.closeQueueEdit()
-		m.setStatus("No queue item to edit.", statusWarn)
+		m.setStatus("No queue available.", statusWarn)
 		return
 	}
-	if m.queueEditIndex < 0 || m.queueEditIndex >= len(state.Items) {
+	if m.queueEditMode == queueEditModeEdit && (m.queueEditIndex < 0 || m.queueEditIndex >= len(state.Items)) {
 		m.closeQueueEdit()
 		m.setStatus("Queue selection changed; edit canceled.", statusWarn)
 		return
@@ -3038,6 +3133,29 @@ func (m *model) applyQueueEdit() {
 	if text == "" {
 		m.closeQueueEdit()
 		m.setStatus("Queue edit canceled (empty).", statusWarn)
+		return
+	}
+	if m.queueEditMode == queueEditModeAdd {
+		summary := text
+		switch m.queueEditKind {
+		case models.QueueItemTypePause:
+			summary = fmt.Sprintf("Pause %s", text)
+		case models.QueueItemTypeConditional:
+			summary = fmt.Sprintf("Wait until %s", text)
+		}
+		item := queueItem{
+			ID:      nextQueueItemID(state),
+			Kind:    m.queueEditKind,
+			Summary: summary,
+			Status:  models.QueueItemStatusPending,
+		}
+		insertIndex := clampInt(m.queueEditIndex, 0, len(state.Items))
+		state.Items = append(state.Items, queueItem{})
+		copy(state.Items[insertIndex+1:], state.Items[insertIndex:])
+		state.Items[insertIndex] = item
+		state.Selected = insertIndex
+		m.closeQueueEdit()
+		m.setStatus("Queue item added.", statusInfo)
 		return
 	}
 	state.Items[m.queueEditIndex].Summary = text
@@ -3066,6 +3184,7 @@ func (m *model) moveQueueItem(state *queueEditorState, delta int) {
 	}
 	state.Items[index], state.Items[next] = state.Items[next], state.Items[index]
 	state.Selected = next
+	m.setStatus("Queue order updated.", statusInfo)
 }
 
 func (m *model) deleteQueueItem(state *queueEditorState) {

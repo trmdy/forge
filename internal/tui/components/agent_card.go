@@ -29,7 +29,8 @@ type AgentCard struct {
 	QueueLength   int
 	LastActivity  *time.Time
 	CooldownUntil *time.Time
-	RecentEvents  []time.Time // Timestamps of recent state changes for activity pulse
+	RecentEvents  []time.Time          // Timestamps of recent state changes for activity pulse
+	UsageMetrics  *models.UsageMetrics // Usage metrics from adapter
 }
 
 // RenderAgentCard renders a compact agent summary card.
@@ -88,6 +89,13 @@ func RenderAgentCard(styleSet styles.Styles, card AgentCard, selected bool) stri
 		lines = append(lines, cooldownLine)
 	}
 	lines = append(lines, confidenceLine, activityLine, queueLine)
+
+	// Usage summary line (if available)
+	usageLine := RenderUsageSummaryLine(styleSet, card.UsageMetrics)
+	if usageLine != "" {
+		lines = append(lines, usageLine)
+	}
+
 	if actionsLine != "" {
 		lines = append(lines, actionsLine)
 	}
