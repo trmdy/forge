@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/opencode-ai/swarm/internal/models"
 )
@@ -81,6 +82,51 @@ func DetectGitInfo(repoPath string) (*models.GitInfo, error) {
 	}
 
 	return info, nil
+}
+
+func listCommitTimesSince(repoPath string, since time.Time, limit int) ([]time.Time, error) {
+	if err := ValidateRepoPath(repoPath); err != nil {
+		return nil, err
+	}
+
+	isRepo, err := isGitRepo(repoPath)
+	if err != nil {
+		return nil, err
+	}
+	if !isRepo {
+		return nil, nil
+	}
+
+	args := []string{
+		"log",
+		"--since",
+		since.Format(time.RFC3339),
+		"--pretty=%ct",
+	}
+	if limit > 0 {
+		args = append(args, fmt.Sprintf("--max-count=%d", limit))
+	}
+
+	stdout, _, err := runGit(repoPath, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Fields(strings.TrimSpace(stdout))
+	commits := make([]time.Time, 0, len(lines))
+	for _, line := range lines {
+		value := strings.TrimSpace(line)
+		if value == "" {
+			continue
+		}
+		epoch, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			continue
+		}
+		commits = append(commits, time.Unix(epoch, 0).UTC())
+	}
+
+	return commits, nil
 }
 
 func isGitRepo(repoPath string) (bool, error) {

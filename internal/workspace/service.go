@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/opencode-ai/swarm/internal/db"
 	"github.com/opencode-ai/swarm/internal/events"
@@ -24,12 +26,28 @@ var (
 	ErrRepoValidationFailed   = errors.New("repository validation failed")
 )
 
+const (
+	agentShutdownGracePeriod  = 5 * time.Second
+	agentShutdownPollInterval = 200 * time.Millisecond
+)
+
+const (
+	pulseWindow            = 60 * time.Minute
+	pulseBucketCount       = 12
+	pulseBucketDuration    = pulseWindow / pulseBucketCount
+	pulseMaxEventsPerAgent = 1000
+	pulseMaxCommits        = 500
+	pulseLevels            = ".:-=+*#@"
+)
+
 // Service manages workspace operations.
 type Service struct {
 	repo        *db.WorkspaceRepository
 	nodeService *node.Service
 	agentRepo   *db.AgentRepository
+	eventRepo   *db.EventRepository
 	publisher   events.Publisher
+	tmuxFactory func() *tmux.Client
 	logger      zerolog.Logger
 }
 
@@ -43,12 +61,27 @@ func WithPublisher(publisher events.Publisher) ServiceOption {
 	}
 }
 
+// WithEventRepository sets the event repository for pulse calculations.
+func WithEventRepository(eventRepo *db.EventRepository) ServiceOption {
+	return func(s *Service) {
+		s.eventRepo = eventRepo
+	}
+}
+
+// WithTmuxClientFactory overrides the tmux client factory.
+func WithTmuxClientFactory(factory func() *tmux.Client) ServiceOption {
+	return func(s *Service) {
+		s.tmuxFactory = factory
+	}
+}
+
 // NewService creates a new WorkspaceService.
 func NewService(repo *db.WorkspaceRepository, nodeService *node.Service, agentRepo *db.AgentRepository, opts ...ServiceOption) *Service {
 	s := &Service{
 		repo:        repo,
 		nodeService: nodeService,
 		agentRepo:   agentRepo,
+		tmuxFactory: tmux.NewLocalClient,
 		logger:      logging.Component("workspace"),
 	}
 	for _, opt := range opts {
@@ -254,6 +287,13 @@ func (s *Service) ImportWorkspace(ctx context.Context, input ImportWorkspaceInpu
 	// Emit event
 	s.publishEvent(ctx, models.EventTypeWorkspaceImported, workspace.ID, nil)
 
+	// Best-effort discovery of existing agents in the session.
+	if s.agentRepo != nil && nodeObj.IsLocal {
+		if err := s.discoverAgentsInSession(ctx, workspace); err != nil {
+			s.logger.Warn().Err(err).Str("workspace_id", workspace.ID).Msg("failed to discover agents in session")
+		}
+	}
+
 	return workspace, nil
 }
 
@@ -349,6 +389,18 @@ type WorkspaceStatusResult struct {
 
 	// Alerts contains current alerts.
 	Alerts []models.Alert
+
+	// Pulse captures recent activity for the workspace.
+	Pulse *WorkspacePulse
+}
+
+// WorkspacePulse summarizes recent workspace activity.
+type WorkspacePulse struct {
+	Sparkline     string `json:"sparkline"`
+	Buckets       []int  `json:"buckets"`
+	WindowMinutes int    `json:"window_minutes"`
+	BucketMinutes int    `json:"bucket_minutes"`
+	Total         int    `json:"total"`
 }
 
 // GetWorkspaceStatus retrieves comprehensive status for a workspace.
@@ -408,6 +460,8 @@ func (s *Service) GetWorkspaceStatus(ctx context.Context, id string) (*Workspace
 		// Fallback when agent repository isn't wired.
 		result.ActiveAgents = workspace.AgentCount
 	}
+
+	result.Pulse = s.computeWorkspacePulse(ctx, workspace)
 
 	return result, nil
 }
@@ -519,12 +573,13 @@ func (s *Service) DestroyWorkspace(ctx context.Context, id string) error {
 	}
 
 	if workspace.TmuxSession != "" {
-		client := tmux.NewLocalClient()
+		client := s.tmuxClient()
 		exists, err := client.HasSession(ctx, workspace.TmuxSession)
 		if err != nil {
 			return fmt.Errorf("failed to check tmux session: %w", err)
 		}
 		if exists {
+			s.gracefulShutdownAgents(ctx, client, workspace.ID, workspace.TmuxSession)
 			if err := client.KillSession(ctx, workspace.TmuxSession); err != nil {
 				return fmt.Errorf("failed to kill tmux session %s: %w", workspace.TmuxSession, err)
 			}
@@ -549,13 +604,285 @@ func (s *Service) DestroyWorkspace(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *Service) gracefulShutdownAgents(ctx context.Context, client *tmux.Client, workspaceID, session string) {
+	if s.agentRepo == nil || strings.TrimSpace(session) == "" {
+		return
+	}
+
+	agents, err := s.agentRepo.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		s.logger.Warn().Err(err).Str("workspace_id", workspaceID).Msg("failed to list agents before destroy")
+		return
+	}
+	if len(agents) == 0 {
+		return
+	}
+
+	var targets []string
+	interrupted := 0
+	hasMismatchedSession := false
+
+	for _, agent := range agents {
+		pane := strings.TrimSpace(agent.TmuxPane)
+		if pane == "" {
+			continue
+		}
+
+		if err := client.SendInterrupt(ctx, pane); err != nil {
+			s.logger.Warn().
+				Err(err).
+				Str("agent_id", agent.ID).
+				Str("pane", pane).
+				Msg("failed to interrupt agent before destroy")
+			continue
+		}
+
+		interrupted++
+		if strings.HasPrefix(pane, session+":") {
+			targets = append(targets, pane)
+		} else {
+			hasMismatchedSession = true
+		}
+	}
+
+	if interrupted == 0 || agentShutdownGracePeriod <= 0 {
+		return
+	}
+
+	if len(targets) == 0 && !hasMismatchedSession {
+		return
+	}
+
+	exited := s.waitForAgentsExit(ctx, client, session, targets, hasMismatchedSession)
+	if !exited {
+		s.logger.Debug().
+			Str("workspace_id", workspaceID).
+			Str("tmux_session", session).
+			Msg("grace period elapsed before agents exited")
+	}
+}
+
+func (s *Service) waitForAgentsExit(ctx context.Context, client *tmux.Client, session string, targets []string, forceTimeout bool) bool {
+	deadline := time.NewTimer(agentShutdownGracePeriod)
+	ticker := time.NewTicker(agentShutdownPollInterval)
+	defer deadline.Stop()
+	defer ticker.Stop()
+
+	for {
+		if !forceTimeout {
+			allExited, err := s.allAgentPanesExited(ctx, client, session, targets)
+			if err != nil {
+				s.logger.Warn().Err(err).Str("tmux_session", session).Msg("failed to check agent panes during shutdown")
+				return false
+			}
+			if allExited {
+				return true
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return false
+		case <-deadline.C:
+			return false
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Service) allAgentPanesExited(ctx context.Context, client *tmux.Client, session string, targets []string) (bool, error) {
+	if len(targets) == 0 {
+		return true, nil
+	}
+
+	panes, err := client.ListPanes(ctx, session)
+	if err != nil {
+		return false, err
+	}
+	if len(panes) == 0 {
+		return true, nil
+	}
+
+	paneTargets := make(map[string]struct{}, len(panes)*3)
+	for _, pane := range panes {
+		paneTargets[fmt.Sprintf("%s:%s", session, pane.ID)] = struct{}{}
+		paneTargets[fmt.Sprintf("%s:%d.%d", session, pane.WindowIndex, pane.Index)] = struct{}{}
+		paneTargets[fmt.Sprintf("%s:%d", session, pane.Index)] = struct{}{}
+	}
+
+	for _, target := range targets {
+		if _, ok := paneTargets[target]; ok {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+func (s *Service) computeWorkspacePulse(ctx context.Context, workspace *models.Workspace) *WorkspacePulse {
+	if workspace == nil {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	since := now.Add(-pulseWindow)
+	buckets := make([]int, pulseBucketCount)
+	total := 0
+	hasSource := false
+
+	if s.eventRepo != nil && s.agentRepo != nil {
+		agents, err := s.agentRepo.ListByWorkspace(ctx, workspace.ID)
+		if err != nil {
+			s.logger.Warn().Err(err).Str("workspace_id", workspace.ID).Msg("failed to list agents for pulse")
+		} else {
+			entityType := models.EntityTypeAgent
+			hasSource = true
+			for _, agent := range agents {
+				if agent == nil || strings.TrimSpace(agent.ID) == "" {
+					continue
+				}
+				agentID := agent.ID
+				page, err := s.eventRepo.Query(ctx, db.EventQuery{
+					EntityType: &entityType,
+					EntityID:   &agentID,
+					Since:      &since,
+					Limit:      pulseMaxEventsPerAgent,
+				})
+				if err != nil {
+					s.logger.Warn().
+						Err(err).
+						Str("agent_id", agentID).
+						Msg("failed to query events for pulse")
+					continue
+				}
+				for _, event := range page.Events {
+					if event == nil || !isPulseEventType(event.Type) {
+						continue
+					}
+					if idx := pulseBucketIndex(event.Timestamp, since); idx >= 0 {
+						buckets[idx]++
+						total++
+					}
+				}
+			}
+		}
+	}
+
+	if strings.TrimSpace(workspace.RepoPath) != "" {
+		commitTimes, err := listCommitTimesSince(workspace.RepoPath, since, pulseMaxCommits)
+		if err != nil {
+			s.logger.Debug().
+				Err(err).
+				Str("workspace_id", workspace.ID).
+				Msg("unable to read commit history for pulse")
+		} else {
+			hasSource = true
+			for _, ts := range commitTimes {
+				if idx := pulseBucketIndex(ts, since); idx >= 0 {
+					buckets[idx]++
+					total++
+				}
+			}
+		}
+	}
+
+	if !hasSource {
+		return nil
+	}
+
+	return &WorkspacePulse{
+		Sparkline:     buildPulseSparkline(buckets),
+		Buckets:       buckets,
+		WindowMinutes: int(pulseWindow.Minutes()),
+		BucketMinutes: int(pulseBucketDuration.Minutes()),
+		Total:         total,
+	}
+}
+
+func isPulseEventType(eventType models.EventType) bool {
+	switch eventType {
+	case models.EventTypeAgentStateChanged,
+		models.EventTypeMessageQueued,
+		models.EventTypeMessageDispatched,
+		models.EventTypeMessageCompleted,
+		models.EventTypeMessageFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func pulseBucketIndex(timestamp, since time.Time) int {
+	if timestamp.Before(since) {
+		return -1
+	}
+	if pulseBucketDuration <= 0 {
+		return -1
+	}
+	offset := timestamp.Sub(since)
+	idx := int(offset / pulseBucketDuration)
+	if idx < 0 {
+		return -1
+	}
+	if idx >= pulseBucketCount {
+		return pulseBucketCount - 1
+	}
+	return idx
+}
+
+func buildPulseSparkline(buckets []int) string {
+	if len(buckets) == 0 {
+		return ""
+	}
+
+	maxValue := 0
+	for _, value := range buckets {
+		if value > maxValue {
+			maxValue = value
+		}
+	}
+
+	levels := []rune(pulseLevels)
+	if len(levels) == 0 {
+		return ""
+	}
+
+	if maxValue == 0 {
+		return strings.Repeat(string(levels[0]), len(buckets))
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(buckets))
+	for _, value := range buckets {
+		index := value * (len(levels) - 1) / maxValue
+		if index < 0 {
+			index = 0
+		}
+		if index >= len(levels) {
+			index = len(levels) - 1
+		}
+		builder.WriteRune(levels[index])
+	}
+
+	return builder.String()
+}
+
 // createTmuxSession creates a new tmux session for a workspace.
 func (s *Service) createTmuxSession(ctx context.Context, workspace *models.Workspace) error {
 	// For now, only support local node
 	// TODO: Support remote nodes via SSH
 
-	client := tmux.NewLocalClient()
-	return client.NewSession(ctx, workspace.TmuxSession, workspace.RepoPath)
+	client := s.tmuxClient()
+	if err := client.NewSession(ctx, workspace.TmuxSession, workspace.RepoPath); err != nil {
+		return err
+	}
+
+	// Create a dedicated window for agents, reserving pane 0 for human interaction.
+	if err := client.NewWindow(ctx, workspace.TmuxSession, tmux.AgentWindowName, workspace.RepoPath); err != nil {
+		return fmt.Errorf("failed to create agent window: %w", err)
+	}
+
+	return nil
 }
 
 // getTmuxSessionWorkingDir gets the working directory of a tmux session.
@@ -564,7 +891,7 @@ func (s *Service) getTmuxSessionWorkingDir(ctx context.Context, nodeObj *models.
 		return "", fmt.Errorf("remote node tmux inspection not yet implemented")
 	}
 
-	client := tmux.NewLocalClient()
+	client := s.tmuxClient()
 
 	// Use ListPanePaths to get the working directories for the session
 	paths, err := client.ListPanePaths(ctx, sessionName)
@@ -584,6 +911,122 @@ func (s *Service) getTmuxSessionWorkingDir(ctx context.Context, nodeObj *models.
 	return repoPath, nil
 }
 
+func (s *Service) discoverAgentsInSession(ctx context.Context, workspace *models.Workspace) error {
+	if workspace == nil || workspace.TmuxSession == "" {
+		return nil
+	}
+
+	client := s.tmuxClient()
+	panes, err := client.ListPanes(ctx, workspace.TmuxSession)
+	if err != nil {
+		return err
+	}
+
+	existing, err := s.agentRepo.ListByWorkspace(ctx, workspace.ID)
+	if err != nil {
+		return err
+	}
+	existingPanes := make(map[string]struct{}, len(existing))
+	for _, agent := range existing {
+		existingPanes[agent.TmuxPane] = struct{}{}
+	}
+
+	for _, pane := range panes {
+		paneTarget := fmt.Sprintf("%s:%s", workspace.TmuxSession, pane.ID)
+		if _, ok := existingPanes[paneTarget]; ok {
+			continue
+		}
+
+		agentType, reason, evidence := detectAgentType(pane.Command, "")
+		if agentType == "" {
+			content, err := client.CapturePane(ctx, paneTarget, false)
+			if err != nil {
+				continue
+			}
+			agentType, reason, evidence = detectAgentType(pane.Command, content)
+		}
+		if agentType == "" {
+			continue
+		}
+
+		now := time.Now().UTC()
+		agent := &models.Agent{
+			WorkspaceID: workspace.ID,
+			Type:        agentType,
+			TmuxPane:    paneTarget,
+			State:       models.AgentStateIdle,
+			StateInfo: models.StateInfo{
+				State:      models.AgentStateIdle,
+				Confidence: models.StateConfidenceLow,
+				Reason:     reason,
+				Evidence:   evidence,
+				DetectedAt: now,
+			},
+			LastActivity: &now,
+		}
+
+		if err := s.agentRepo.Create(ctx, agent); err != nil {
+			s.logger.Warn().Err(err).Str("tmux_pane", paneTarget).Msg("failed to record discovered agent")
+			continue
+		}
+
+		s.logger.Info().
+			Str("workspace_id", workspace.ID).
+			Str("agent_id", agent.ID).
+			Str("tmux_pane", agent.TmuxPane).
+			Str("type", string(agent.Type)).
+			Msg("discovered agent in tmux pane")
+	}
+
+	return nil
+}
+
+func detectAgentType(command, screen string) (models.AgentType, string, []string) {
+	lowerCmd := strings.ToLower(strings.TrimSpace(command))
+	if agentType, ok := agentTypeFromHint(lowerCmd); ok {
+		return agentType, fmt.Sprintf("pane command detected: %s", lowerCmd), []string{lowerCmd}
+	}
+
+	lowerScreen := strings.ToLower(screen)
+	if agentType, ok := agentTypeFromHint(lowerScreen); ok {
+		return agentType, "agent signature detected in pane output", []string{agentTypeHint(agentType)}
+	}
+
+	return "", "", nil
+}
+
+func agentTypeFromHint(hint string) (models.AgentType, bool) {
+	switch {
+	case strings.Contains(hint, "opencode"):
+		return models.AgentTypeOpenCode, true
+	case strings.Contains(hint, "claude"):
+		return models.AgentTypeClaudeCode, true
+	case strings.Contains(hint, "codex"):
+		return models.AgentTypeCodex, true
+	case strings.Contains(hint, "gemini"):
+		return models.AgentTypeGemini, true
+	case strings.Contains(hint, "aider"):
+		return models.AgentTypeGeneric, true
+	default:
+		return "", false
+	}
+}
+
+func agentTypeHint(agentType models.AgentType) string {
+	switch agentType {
+	case models.AgentTypeOpenCode:
+		return "opencode"
+	case models.AgentTypeClaudeCode:
+		return "claude"
+	case models.AgentTypeCodex:
+		return "codex"
+	case models.AgentTypeGemini:
+		return "gemini"
+	default:
+		return "agent"
+	}
+}
+
 // isTmuxSessionActive checks if a tmux session is running.
 func (s *Service) isTmuxSessionActive(ctx context.Context, nodeObj *models.Node, sessionName string) bool {
 	if !nodeObj.IsLocal {
@@ -591,7 +1034,7 @@ func (s *Service) isTmuxSessionActive(ctx context.Context, nodeObj *models.Node,
 		return false
 	}
 
-	client := tmux.NewLocalClient()
+	client := s.tmuxClient()
 	exists, err := client.HasSession(ctx, sessionName)
 	if err != nil {
 		return false
@@ -613,4 +1056,11 @@ func (s *Service) publishEvent(ctx context.Context, eventType models.EventType, 
 	}
 
 	s.publisher.Publish(ctx, event)
+}
+
+func (s *Service) tmuxClient() *tmux.Client {
+	if s.tmuxFactory != nil {
+		return s.tmuxFactory()
+	}
+	return tmux.NewLocalClient()
 }
