@@ -119,6 +119,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.paletteOpen {
 			return m.updatePalette(msg)
 		}
+		// Handle grid navigation in workspace view
+		if m.view == viewWorkspace && m.workspaceGrid != nil {
+			switch msg.String() {
+			case "up", "k":
+				m.workspaceGrid.MoveUp()
+				return m, nil
+			case "down", "j":
+				m.workspaceGrid.MoveDown()
+				return m, nil
+			case "left", "h":
+				m.workspaceGrid.MoveLeft()
+				return m, nil
+			case "right", "l":
+				m.workspaceGrid.MoveRight()
+				return m, nil
+			case "enter":
+				// Drill down into selected workspace
+				if ws := m.workspaceGrid.SelectedWorkspace(); ws != nil {
+					m.selectedWsID = ws.ID
+					// TODO: Navigate to workspace detail view
+				}
+				return m, nil
+			case "/":
+				// TODO: Open search/filter mode
+				return m, nil
+			}
+		}
 		switch msg.String() {
 		case "1":
 			m.view = viewDashboard
@@ -133,11 +160,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = nextView(m.view)
 			m.selectedView = m.view
 		case "left", "up":
-			m.selectedView = prevView(m.selectedView)
+			if m.view != viewWorkspace {
+				m.selectedView = prevView(m.selectedView)
+			}
 		case "right", "down":
-			m.selectedView = nextView(m.selectedView)
+			if m.view != viewWorkspace {
+				m.selectedView = nextView(m.selectedView)
+			}
 		case "enter":
-			m.view = m.selectedView
+			if m.view != viewWorkspace {
+				m.view = m.selectedView
+			}
 		case "ctrl+k", ":":
 			m.openPalette()
 		case "?":
@@ -254,16 +287,24 @@ func prevView(current viewID) viewID {
 	}
 }
 
-func (m model) viewLines() []string {
+func (m *model) viewLines() []string {
 	switch m.view {
 	case viewWorkspace:
+		// Update grid dimensions based on window size
+		if m.workspaceGrid != nil {
+			m.workspaceGrid.Width = m.width
+			m.workspaceGrid.Height = m.height - 10 // Reserve space for header/footer
+		}
+
 		lines := []string{
 			m.styles.Accent.Render("Workspace view"),
-			m.styles.Text.Render("Workspace cards (sample data)"),
+			m.styles.Muted.Render("↑↓←→/hjkl: navigate | Enter: open | /: filter"),
 			"",
 		}
-		for _, card := range sampleWorkspaceCards() {
-			lines = append(lines, components.RenderWorkspaceCard(m.styles, card), "")
+		if m.workspaceGrid != nil {
+			lines = append(lines, m.workspaceGrid.Render(m.styles))
+		} else {
+			lines = append(lines, m.styles.Muted.Render("No workspaces. Use 'swarm ws create' to create one."))
 		}
 		return lines
 	case viewAgent:
