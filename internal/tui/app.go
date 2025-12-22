@@ -61,67 +61,78 @@ func RunWithConfig(cfg Config) error {
 }
 
 type model struct {
-	width                 int
-	height                int
-	styles                styles.Styles
-	view                  viewID
-	selectedView          viewID
-	showHelp              bool
-	showInspector         bool
-	selectedAgent         string
-	selectedAgentIndex    int
-	pausedAll             bool
-	statusMsg             string
-	statusSeverity        statusSeverity
-	statusExpiresAt       time.Time
-	searchOpen            bool
-	searchQuery           string
-	searchPrevQuery       string
-	searchTarget          viewID
-	agentFilter           string
-	approvalsOpen         bool
-	approvalsByWorkspace  map[string][]approvalItem
-	approvalsSelected     int
-	actionConfirmOpen     bool
-	actionConfirmAction   string
-	actionConfirmAgent    string
-	actionInFlightAction  string
-	actionInFlightAgent   string
-	queueEditorOpen       bool
-	queueEditors          map[string]*queueEditorState
-	queueEditOpen         bool
-	queueEditBuffer       string
-	queueEditIndex        int
-	queueEditAgent        string
-	queueEditMode         queueEditMode
-	queueEditKind         models.QueueItemType
-	queueEditPrompt       string
-	transcriptSearchOpen  bool
-	transcriptSearchQuery string
-	paletteOpen           bool
-	paletteQuery          string
-	paletteIndex          int
-	lastUpdated           time.Time
-	stale                 bool
-	stateEngine           *state.Engine
-	agentStates           map[string]models.AgentState
-	agentInfo             map[string]models.StateInfo
-	agentLast             map[string]time.Time
-	agentCooldowns        map[string]time.Time
-	agentRecentEvents     map[string][]time.Time // Recent state change timestamps per agent
-	workspaceRecentEvents map[string][]time.Time // Recent state change timestamps per workspace
-	agentWorkspaces       map[string]string      // Cached workspace IDs per agent
-	stateChanges          []StateChangeMsg
-	nodes                 []nodeSummary
-	nodesPreview          bool
-	workspacesPreview     bool
-	workspaceGrid         *components.WorkspaceGrid
-	selectedWsID          string // Selected workspace ID for drill-down
-	pulseFrame            int
-	transcriptViewer      *components.TranscriptViewer
-	transcriptPreview     bool
-	showTranscript        bool
-	transcriptAutoScroll  bool
+	width                  int
+	height                 int
+	styles                 styles.Styles
+	view                   viewID
+	selectedView           viewID
+	showHelp               bool
+	showInspector          bool
+	selectedAgent          string
+	selectedAgentIndex     int
+	pausedAll              bool
+	statusMsg              string
+	statusSeverity         statusSeverity
+	statusExpiresAt        time.Time
+	searchOpen             bool
+	searchQuery            string
+	searchPrevQuery        string
+	searchTarget           viewID
+	agentFilter            string
+	approvalsOpen          bool
+	approvalsByWorkspace   map[string][]approvalItem
+	approvalsSelected      int
+	approvalsMarked        map[string]map[string]bool
+	approvalsBulkConfirm   bool
+	approvalsBulkAction    models.ApprovalStatus
+	approvalsBulkTargets   []string
+	approvalsBulkWorkspace string
+	actionConfirmOpen      bool
+	actionConfirmAction    string
+	actionConfirmAgent     string
+	profileSelectOpen      bool
+	profileSelectIndex     int
+	profileSelectOptions   []string
+	profileSelectAgent     string
+	profileSwitchPending   string
+	actionInFlightAction   string
+	actionInFlightAgent    string
+	queueEditorOpen        bool
+	queueEditors           map[string]*queueEditorState
+	queueEditOpen          bool
+	queueEditBuffer        string
+	queueEditIndex         int
+	queueEditAgent         string
+	queueEditMode          queueEditMode
+	queueEditKind          models.QueueItemType
+	queueEditPrompt        string
+	transcriptSearchOpen   bool
+	transcriptSearchQuery  string
+	paletteOpen            bool
+	paletteQuery           string
+	paletteIndex           int
+	lastUpdated            time.Time
+	stale                  bool
+	stateEngine            *state.Engine
+	agentStates            map[string]models.AgentState
+	agentInfo              map[string]models.StateInfo
+	agentLast              map[string]time.Time
+	agentCooldowns         map[string]time.Time
+	agentRecentEvents      map[string][]time.Time // Recent state change timestamps per agent
+	workspaceRecentEvents  map[string][]time.Time // Recent state change timestamps per workspace
+	agentWorkspaces        map[string]string      // Cached workspace IDs per agent
+	agentProfileOverrides  map[string]string
+	stateChanges           []StateChangeMsg
+	nodes                  []nodeSummary
+	nodesPreview           bool
+	workspacesPreview      bool
+	workspaceGrid          *components.WorkspaceGrid
+	selectedWsID           string // Selected workspace ID for drill-down
+	pulseFrame             int
+	transcriptViewer       *components.TranscriptViewer
+	transcriptPreview      bool
+	showTranscript         bool
+	transcriptAutoScroll   bool
 }
 
 type nodeSummary struct {
@@ -201,6 +212,7 @@ func initialModel() model {
 		agentRecentEvents:     make(map[string][]time.Time),
 		workspaceRecentEvents: make(map[string][]time.Time),
 		agentWorkspaces:       make(map[string]string),
+		agentProfileOverrides: make(map[string]string),
 		stateChanges:          make([]StateChangeMsg, 0),
 		nodes:                 sampleNodes(),
 		nodesPreview:          true,
@@ -208,6 +220,7 @@ func initialModel() model {
 		workspacesPreview:     true,
 		queueEditors:          queueEditors,
 		approvalsByWorkspace:  approvals,
+		approvalsMarked:       make(map[string]map[string]bool),
 		transcriptViewer:      tv,
 		transcriptPreview:     true,
 		transcriptAutoScroll:  true,
@@ -223,6 +236,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.actionConfirmOpen {
 			return m.updateActionConfirm(msg)
+		}
+		if m.profileSelectOpen {
+			return m.updateProfileSelector(msg)
+		}
+		if m.approvalsBulkConfirm && m.view == viewWorkspace {
+			return m.updateBulkApprovalConfirm(msg)
 		}
 		if m.paletteOpen {
 			return m.updatePalette(msg)
@@ -329,6 +348,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "A":
 				m.approvalsOpen = !m.approvalsOpen
+				if m.approvalsOpen {
+					if ws := m.selectedWorkspace(); ws != nil {
+						m.clearApprovalMarks(ws.ID)
+					}
+				} else {
+					m.cancelBulkApproval()
+				}
 				return m, nil
 			}
 		}
@@ -386,6 +412,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// View action - toggle inspector and focus on selected agent
 				m.showInspector = true
 				return m, nil
+			}
+		}
+		if m.view == viewAgentDetail {
+			switch msg.String() {
+			case "p":
+				m.openProfileSelector()
+				return m, nil
+			case "I":
+				return m, m.requestAgentAction(actionInterrupt, true)
+			case "R":
+				return m, m.requestAgentAction(actionRestart, true)
+			case "P":
+				action := actionPause
+				if card := m.selectedAgentCard(); card != nil && card.State == models.AgentStatePaused {
+					action = actionResume
+				}
+				return m, m.requestAgentAction(action, true)
 			}
 		}
 		switch msg.String() {
@@ -578,12 +621,13 @@ const (
 )
 
 const (
-	actionInterrupt  = "interrupt"
-	actionRestart    = "restart"
-	actionExportLogs = "export_logs"
-	actionPause      = "pause"
-	actionResume     = "resume"
-	actionView       = "view"
+	actionInterrupt     = "interrupt"
+	actionRestart       = "restart"
+	actionExportLogs    = "export_logs"
+	actionPause         = "pause"
+	actionResume        = "resume"
+	actionSwitchProfile = "switch_profile"
+	actionView          = "view"
 )
 
 func nextView(current viewID) viewID {
@@ -817,13 +861,32 @@ func (m model) workspaceInspectorLines() []string {
 		m.styles.Text.Render(fmt.Sprintf("Agents: %d", ws.AgentCount)),
 	}
 
-	if ws.GitInfo != nil {
-		branch := defaultLabel(ws.GitInfo.Branch)
-		line := m.styles.Muted.Render(fmt.Sprintf("Branch: %s", branch))
-		if ws.GitInfo.IsDirty {
-			line += m.styles.Warning.Render(" *dirty")
+	// Git status section
+	lines = append(lines, "", m.styles.Accent.Render("Git"))
+	if ws.GitInfo != nil && ws.GitInfo.IsRepo {
+		branchStatus := components.RenderGitStatusCompact(m.styles, ws.GitInfo)
+		lines = append(lines, fmt.Sprintf("  Branch: %s", branchStatus))
+
+		syncStatus := components.RenderGitSyncStatus(m.styles, ws.GitInfo)
+		if syncStatus != "" {
+			lines = append(lines, fmt.Sprintf("  Sync: %s", syncStatus))
 		}
-		lines = append(lines, line)
+
+		gitData := components.GitStatusData{Info: ws.GitInfo}
+		changeSummary := components.RenderGitChangeSummary(m.styles, gitData)
+		if changeSummary != "" {
+			lines = append(lines, fmt.Sprintf("  Changes: %s", changeSummary))
+		}
+
+		if ws.GitInfo.LastCommit != "" {
+			shortHash := ws.GitInfo.LastCommit
+			if len(shortHash) > 7 {
+				shortHash = shortHash[:7]
+			}
+			lines = append(lines, m.styles.Muted.Render(fmt.Sprintf("  Commit: %s", shortHash)))
+		}
+	} else {
+		lines = append(lines, m.styles.Muted.Render("  Not a git repository"))
 	}
 
 	if len(ws.Alerts) > 0 {
@@ -850,11 +913,13 @@ func (m model) approvalsInboxLines() []string {
 
 	selectedIdx := approvalSelectionIndex(m.approvalsSelected, len(approvals))
 	pending := countApprovalStatus(approvals, models.ApprovalStatusPending)
+	selectedCount := m.countMarkedApprovals(ws.ID, approvals)
 	lines := []string{
 		m.styles.Text.Render("Approvals inbox"),
 		m.styles.Muted.Render(fmt.Sprintf("Workspace: %s", workspaceDisplayName(ws))),
 		m.styles.Muted.Render(fmt.Sprintf("Pending: %d / %d", pending, len(approvals))),
-		m.styles.Muted.Render("↑↓/jk: move | y: approve | n: deny | esc: close"),
+		m.styles.Muted.Render(fmt.Sprintf("Selected: %d", selectedCount)),
+		m.styles.Muted.Render("↑↓/jk: move | x: select | Ctrl+A: select all | y: approve | n: deny | Y/N: bulk | esc: close"),
 	}
 
 	maxWidth := m.inspectorContentWidth()
@@ -863,9 +928,13 @@ func (m model) approvalsInboxLines() []string {
 		if i == selectedIdx {
 			prefix = "> "
 		}
+		marker := "[ ]"
+		if m.isApprovalMarked(ws.ID, item.ID) {
+			marker = "[x]"
+		}
 		status := approvalStatusBadge(m.styles, item.Status)
 		risk := approvalRiskBadge(m.styles, item.Risk)
-		line := fmt.Sprintf("%s%s %s %s", prefix, status, risk, approvalSummary(item))
+		line := fmt.Sprintf("%s%s %s %s %s", prefix, marker, status, risk, approvalSummary(item))
 		if maxWidth > 0 {
 			line = truncateText(line, maxWidth)
 		}
@@ -878,6 +947,10 @@ func (m model) approvalsInboxLines() []string {
 
 	lines = append(lines, "")
 	lines = append(lines, m.approvalDetailLines(approvals[selectedIdx], maxWidth)...)
+	if m.approvalsBulkConfirm && m.approvalsBulkWorkspace == ws.ID {
+		lines = append(lines, "")
+		lines = append(lines, m.bulkApprovalConfirmLine())
+	}
 
 	return lines
 }
@@ -918,6 +991,18 @@ func (m model) approvalsForWorkspace(id string) []approvalItem {
 		return nil
 	}
 	return m.approvalsByWorkspace[id]
+}
+
+func (m model) bulkApprovalConfirmLine() string {
+	count := len(m.approvalsBulkTargets)
+	action := "approve"
+	if m.approvalsBulkAction == models.ApprovalStatusDenied {
+		action = "deny"
+	}
+	if count == 1 {
+		return m.styles.Warning.Render(fmt.Sprintf("Confirm %s 1 approval? y: confirm | n: cancel", action))
+	}
+	return m.styles.Warning.Render(fmt.Sprintf("Confirm %s %d approvals? y: confirm | n: cancel", action, count))
 }
 
 func approvalSelectionIndex(idx, count int) int {
@@ -1002,6 +1087,224 @@ func countApprovalStatus(items []approvalItem, status models.ApprovalStatus) int
 		}
 	}
 	return count
+}
+
+func (m *model) approvalSelectionMap(wsID string) map[string]bool {
+	if strings.TrimSpace(wsID) == "" {
+		return nil
+	}
+	if m.approvalsMarked == nil {
+		m.approvalsMarked = make(map[string]map[string]bool)
+	}
+	if m.approvalsMarked[wsID] == nil {
+		m.approvalsMarked[wsID] = make(map[string]bool)
+	}
+	return m.approvalsMarked[wsID]
+}
+
+func (m *model) isApprovalMarked(wsID, approvalID string) bool {
+	if m.approvalsMarked == nil {
+		return false
+	}
+	if m.approvalsMarked[wsID] == nil {
+		return false
+	}
+	return m.approvalsMarked[wsID][approvalID]
+}
+
+func (m *model) countMarkedApprovals(wsID string, items []approvalItem) int {
+	if len(items) == 0 {
+		return 0
+	}
+	if m.approvalsMarked == nil {
+		return 0
+	}
+	marked := m.approvalsMarked[wsID]
+	if len(marked) == 0 {
+		return 0
+	}
+	count := 0
+	for _, item := range items {
+		if marked[item.ID] {
+			count++
+		}
+	}
+	return count
+}
+
+func (m *model) toggleApprovalMark(wsID string, item approvalItem) bool {
+	if item.Status != models.ApprovalStatusPending {
+		m.setStatus("Only pending approvals can be selected.", statusWarn)
+		return false
+	}
+	marked := m.approvalSelectionMap(wsID)
+	if marked == nil {
+		return false
+	}
+	if marked[item.ID] {
+		delete(marked, item.ID)
+		return false
+	}
+	marked[item.ID] = true
+	return true
+}
+
+func (m *model) clearApprovalMarks(wsID string) {
+	if m.approvalsMarked == nil {
+		return
+	}
+	delete(m.approvalsMarked, wsID)
+}
+
+func pendingApprovalIDs(items []approvalItem) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Status == models.ApprovalStatusPending {
+			ids = append(ids, item.ID)
+		}
+	}
+	return ids
+}
+
+func (m *model) bulkApprovalTargets(wsID string, items []approvalItem) []string {
+	if m.approvalsMarked != nil {
+		if marked := m.approvalsMarked[wsID]; len(marked) > 0 {
+			ids := make([]string, 0, len(marked))
+			for _, item := range items {
+				if marked[item.ID] {
+					ids = append(ids, item.ID)
+				}
+			}
+			return ids
+		}
+	}
+	return pendingApprovalIDs(items)
+}
+
+func (m *model) toggleAllPendingApprovals(wsID string, items []approvalItem) {
+	if strings.TrimSpace(wsID) == "" || len(items) == 0 {
+		m.setStatus("No approvals to select.", statusWarn)
+		return
+	}
+	pendingIDs := pendingApprovalIDs(items)
+	if len(pendingIDs) == 0 {
+		m.setStatus("No pending approvals to select.", statusWarn)
+		return
+	}
+	marked := m.approvalSelectionMap(wsID)
+	if marked == nil {
+		return
+	}
+	allSelected := true
+	for _, id := range pendingIDs {
+		if !marked[id] {
+			allSelected = false
+			break
+		}
+	}
+	if allSelected {
+		for _, id := range pendingIDs {
+			delete(marked, id)
+		}
+		m.setStatus("Cleared approval selection.", statusInfo)
+		return
+	}
+	for _, id := range pendingIDs {
+		marked[id] = true
+	}
+	m.setStatus("Selected all pending approvals.", statusInfo)
+}
+
+func (m *model) startBulkApproval(status models.ApprovalStatus) {
+	items, wsID := m.approvalsForSelectedWorkspace()
+	if wsID == "" || len(items) == 0 {
+		m.setStatus("No approvals to update.", statusWarn)
+		return
+	}
+	targets := m.bulkApprovalTargets(wsID, items)
+	if len(targets) == 0 {
+		m.setStatus("No pending approvals to update.", statusWarn)
+		return
+	}
+	m.approvalsBulkConfirm = true
+	m.approvalsBulkAction = status
+	m.approvalsBulkTargets = targets
+	m.approvalsBulkWorkspace = wsID
+}
+
+func (m *model) cancelBulkApproval() {
+	m.approvalsBulkConfirm = false
+	m.approvalsBulkAction = ""
+	m.approvalsBulkTargets = nil
+	m.approvalsBulkWorkspace = ""
+}
+
+func (m *model) updateBulkApprovalConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y", "enter":
+		m.applyBulkApproval()
+		return m, nil
+	case "n", "N", "esc":
+		action := "Bulk approval"
+		if m.approvalsBulkAction == models.ApprovalStatusDenied {
+			action = "Bulk denial"
+		}
+		m.cancelBulkApproval()
+		m.setStatus(fmt.Sprintf("%s canceled.", action), statusInfo)
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m *model) applyBulkApproval() {
+	wsID := strings.TrimSpace(m.approvalsBulkWorkspace)
+	if wsID == "" {
+		m.cancelBulkApproval()
+		return
+	}
+	items := m.approvalsForWorkspace(wsID)
+	if len(items) == 0 {
+		m.cancelBulkApproval()
+		m.setStatus("No approvals to update.", statusWarn)
+		return
+	}
+	targetSet := make(map[string]struct{}, len(m.approvalsBulkTargets))
+	for _, id := range m.approvalsBulkTargets {
+		if strings.TrimSpace(id) != "" {
+			targetSet[id] = struct{}{}
+		}
+	}
+	updated := 0
+	for i := range items {
+		if _, ok := targetSet[items[i].ID]; !ok {
+			continue
+		}
+		if items[i].Status != models.ApprovalStatusPending {
+			continue
+		}
+		items[i].Status = m.approvalsBulkAction
+		updated++
+	}
+	if m.approvalsByWorkspace == nil {
+		m.approvalsByWorkspace = make(map[string][]approvalItem)
+	}
+	m.approvalsByWorkspace[wsID] = items
+	m.clearApprovalMarks(wsID)
+	action := "Approved"
+	if m.approvalsBulkAction == models.ApprovalStatusDenied {
+		action = "Denied"
+	}
+	if updated == 0 {
+		m.setStatus("No pending approvals updated.", statusWarn)
+	} else {
+		m.setStatus(fmt.Sprintf("%s %d approvals.", action, updated), statusInfo)
+	}
+	m.cancelBulkApproval()
 }
 
 func wrapIndented(text string, maxWidth int, style lipgloss.Style, indent string) []string {
@@ -1479,8 +1782,15 @@ func (m model) agentDetailView() []string {
 
 	// Header with agent name and back hint
 	header := m.styles.Title.Render(fmt.Sprintf("Agent: %s", card.Name))
-	backHint := m.styles.Muted.Render("Esc: back | Q: queue | I: interrupt | R: restart | P: pause")
-	lines = append(lines, header, backHint, "")
+	backHint := m.styles.Muted.Render("Esc: back | p: profile | I: interrupt | R: restart | P: pause")
+	lines = append(lines, header, backHint)
+	if line := m.actionConfirmLine(); line != "" {
+		lines = append(lines, line)
+	}
+	if line := m.actionProgressLine(); line != "" {
+		lines = append(lines, line)
+	}
+	lines = append(lines, "")
 
 	// Calculate layout widths
 	leftWidth := m.width * 2 / 3
@@ -1550,8 +1860,32 @@ func (m model) renderAgentDetailProfile(card *components.AgentCard, width int) s
 	lines = append(lines, typeLine, modelLine)
 
 	// Profile
-	profileLine := m.styles.Muted.Render(fmt.Sprintf("Profile: %s", defaultIfEmpty(card.Profile, "--")))
+	profileLabel := defaultIfEmpty(card.Profile, "--")
+	profileLine := m.styles.Muted.Render(fmt.Sprintf("Profile: %s", profileLabel))
 	lines = append(lines, profileLine)
+	if m.profileSelectOpen && m.profileSelectAgent == card.Name {
+		lines = append(lines, m.styles.Muted.Render("Select profile:"))
+		if len(m.profileSelectOptions) == 0 {
+			lines = append(lines, m.styles.Warning.Render("No profiles available."))
+		} else {
+			for i, option := range m.profileSelectOptions {
+				label := option
+				if width > 10 {
+					label = truncateText(label, width-6)
+				}
+				prefix := "  "
+				line := fmt.Sprintf("%s%s", prefix, label)
+				if i == m.profileSelectIndex {
+					lines = append(lines, m.styles.Accent.Render("> "+label))
+				} else {
+					lines = append(lines, m.styles.Muted.Render(line))
+				}
+			}
+			lines = append(lines, m.styles.Muted.Render("enter: confirm | esc: cancel"))
+		}
+	} else if len(m.profileOptions(card)) > 0 {
+		lines = append(lines, m.styles.Muted.Render("p: switch profile"))
+	}
 
 	// Confidence
 	confidenceLabel, bars, style := agentConfidenceDescriptor(m.styles, card.Confidence)
@@ -2013,6 +2347,8 @@ func (m model) helpLines() []string {
 			))
 		}
 		lines = append(lines, m.styles.Muted.Render("Actions: I interrupt | R restart | E export"))
+	case viewAgentDetail:
+		lines = append(lines, m.styles.Muted.Render("Agent detail: p profile | I interrupt | R restart | P pause | Esc back"))
 	}
 
 	lines = append(lines, m.styles.Muted.Render("Global: ctrl+k palette | i/tab inspector | ? help | q quit"))
@@ -2519,7 +2855,7 @@ func (m model) agentCards() []components.AgentCard {
 
 func (m model) allAgentCards() []components.AgentCard {
 	if len(m.agentStates) == 0 {
-		return sampleAgentCards()
+		return m.applyProfileOverrides(sampleAgentCards())
 	}
 
 	cards := make([]components.AgentCard, 0, len(m.agentStates))
@@ -2551,6 +2887,18 @@ func (m model) allAgentCards() []components.AgentCard {
 	sort.Slice(cards, func(i, j int) bool {
 		return cards[i].Name < cards[j].Name
 	})
+	return m.applyProfileOverrides(cards)
+}
+
+func (m model) applyProfileOverrides(cards []components.AgentCard) []components.AgentCard {
+	if len(cards) == 0 || m.agentProfileOverrides == nil {
+		return cards
+	}
+	for i := range cards {
+		if profile := strings.TrimSpace(m.agentProfileOverrides[cards[i].Name]); profile != "" {
+			cards[i].Profile = profile
+		}
+	}
 	return cards
 }
 
@@ -2866,6 +3214,121 @@ func (m *model) applySearchSelection() {
 	}
 }
 
+func (m *model) openProfileSelector() {
+	card := m.selectedAgentCard()
+	if card == nil {
+		m.setStatus("No agent selected.", statusWarn)
+		return
+	}
+	options := m.profileOptions(card)
+	if len(options) == 0 {
+		m.setStatus("No profiles available.", statusWarn)
+		return
+	}
+	m.profileSelectOptions = options
+	m.profileSelectAgent = card.Name
+	m.profileSelectIndex = profileIndex(options, card.Profile)
+	if m.profileSelectIndex < 0 {
+		m.profileSelectIndex = 0
+	}
+	m.profileSelectOpen = true
+}
+
+func (m *model) closeProfileSelector() {
+	m.profileSelectOpen = false
+	m.profileSelectOptions = nil
+	m.profileSelectAgent = ""
+	m.profileSelectIndex = 0
+}
+
+func (m *model) updateProfileSelector(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if len(m.profileSelectOptions) == 0 {
+		m.closeProfileSelector()
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc":
+		m.closeProfileSelector()
+		return m, nil
+	case "up", "k":
+		if m.profileSelectIndex > 0 {
+			m.profileSelectIndex--
+		}
+		return m, nil
+	case "down", "j":
+		if m.profileSelectIndex < len(m.profileSelectOptions)-1 {
+			m.profileSelectIndex++
+		}
+		return m, nil
+	case "enter":
+		selected := m.profileSelectOptions[m.profileSelectIndex]
+		agent := m.profileSelectAgent
+		m.closeProfileSelector()
+		current := strings.TrimSpace(m.currentProfile(agent))
+		if strings.EqualFold(strings.TrimSpace(selected), current) {
+			m.setStatus("Profile already active.", statusInfo)
+			return m, nil
+		}
+		m.profileSwitchPending = selected
+		m.openActionConfirm(actionSwitchProfile, agent)
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m model) profileOptions(card *components.AgentCard) []string {
+	options := make(map[string]struct{})
+	for _, existing := range m.allAgentCards() {
+		if profile := strings.TrimSpace(existing.Profile); profile != "" {
+			options[profile] = struct{}{}
+		}
+	}
+	if card != nil {
+		if profile := strings.TrimSpace(card.Profile); profile != "" {
+			options[profile] = struct{}{}
+		}
+	}
+	if len(options) == 0 {
+		return nil
+	}
+	profiles := make([]string, 0, len(options))
+	for profile := range options {
+		profiles = append(profiles, profile)
+	}
+	sort.Strings(profiles)
+	return profiles
+}
+
+func (m model) currentProfile(agent string) string {
+	agent = strings.TrimSpace(agent)
+	if agent == "" {
+		return ""
+	}
+	cards := m.allAgentCards()
+	if card := findAgentCardByName(cards, agent); card != nil {
+		return strings.TrimSpace(card.Profile)
+	}
+	if m.agentProfileOverrides != nil {
+		return strings.TrimSpace(m.agentProfileOverrides[agent])
+	}
+	return ""
+}
+
+func profileIndex(options []string, value string) int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return -1
+	}
+	for i, option := range options {
+		if strings.EqualFold(option, value) {
+			return i
+		}
+	}
+	return -1
+}
+
 func (m *model) requestAgentAction(action string, requiresConfirm bool) tea.Cmd {
 	card := m.selectedAgentCard()
 	if card == nil {
@@ -2890,6 +3353,7 @@ func (m *model) closeActionConfirm() {
 	m.actionConfirmOpen = false
 	m.actionConfirmAction = ""
 	m.actionConfirmAgent = ""
+	m.profileSwitchPending = ""
 }
 
 func (m *model) updateActionConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -2897,7 +3361,11 @@ func (m *model) updateActionConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y", "Y", "enter":
 		action := m.actionConfirmAction
 		agent := m.actionConfirmAgent
+		profile := m.profileSwitchPending
 		m.closeActionConfirm()
+		if action == actionSwitchProfile {
+			return m, m.applyProfileSwitch(agent, profile)
+		}
 		return m, m.applyAgentAction(action, agent)
 	case "n", "N", "esc":
 		label := actionLabel(m.actionConfirmAction)
@@ -2932,10 +3400,30 @@ func (m *model) applyAgentAction(action, agent string) tea.Cmd {
 	return actionCompleteCmd(action, agent)
 }
 
+func (m *model) applyProfileSwitch(agent, profile string) tea.Cmd {
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		m.setStatus("Profile is required.", statusWarn)
+		return nil
+	}
+	if m.agentProfileOverrides == nil {
+		m.agentProfileOverrides = make(map[string]string)
+	}
+	m.agentProfileOverrides[agent] = profile
+	m.actionInFlightAction = actionSwitchProfile
+	m.actionInFlightAgent = agent
+	m.setStatus(fmt.Sprintf("Restart requested for %s with profile %s (preview).", agent, profile), statusInfo)
+	return actionCompleteCmd(actionSwitchProfile, agent)
+}
+
 func (m *model) updateApprovalsInbox(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "A":
 		m.approvalsOpen = false
+		if _, wsID := m.approvalsForSelectedWorkspace(); wsID != "" {
+			m.clearApprovalMarks(wsID)
+		}
+		m.cancelBulkApproval()
 		return true, nil
 	case "up", "k":
 		m.moveApprovalSelection(-1)
@@ -2943,11 +3431,36 @@ func (m *model) updateApprovalsInbox(msg tea.KeyMsg) (bool, tea.Cmd) {
 	case "down", "j":
 		m.moveApprovalSelection(1)
 		return true, nil
+	case "x", " ", "space":
+		items, wsID := m.approvalsForSelectedWorkspace()
+		if wsID == "" || len(items) == 0 {
+			m.setStatus("No approvals to select.", statusWarn)
+			return true, nil
+		}
+		idx := approvalSelectionIndex(m.approvalsSelected, len(items))
+		if idx < 0 || idx >= len(items) {
+			m.setStatus("No approval selected.", statusWarn)
+			return true, nil
+		}
+		m.toggleApprovalMark(wsID, items[idx])
+		return true, nil
+	case "ctrl+a":
+		items, wsID := m.approvalsForSelectedWorkspace()
+		m.toggleAllPendingApprovals(wsID, items)
+		return true, nil
 	case "y", "Y":
-		m.resolveSelectedApproval(models.ApprovalStatusApproved)
+		if msg.String() == "Y" {
+			m.startBulkApproval(models.ApprovalStatusApproved)
+		} else {
+			m.resolveSelectedApproval(models.ApprovalStatusApproved)
+		}
 		return true, nil
 	case "n", "N":
-		m.resolveSelectedApproval(models.ApprovalStatusDenied)
+		if msg.String() == "N" {
+			m.startBulkApproval(models.ApprovalStatusDenied)
+		} else {
+			m.resolveSelectedApproval(models.ApprovalStatusDenied)
+		}
 		return true, nil
 	}
 	return false, nil
@@ -2980,6 +3493,9 @@ func (m *model) resolveSelectedApproval(status models.ApprovalStatus) {
 		m.approvalsByWorkspace = make(map[string][]approvalItem)
 	}
 	m.approvalsByWorkspace[wsID] = items
+	if marked := m.approvalSelectionMap(wsID); marked != nil {
+		delete(marked, items[idx].ID)
+	}
 
 	action := "Approved"
 	if status == models.ApprovalStatusDenied {
@@ -3399,6 +3915,13 @@ func (m model) actionConfirmLine() string {
 	if agent == "" {
 		agent = "agent"
 	}
+	if m.actionConfirmAction == actionSwitchProfile {
+		profile := strings.TrimSpace(m.profileSwitchPending)
+		if profile == "" {
+			profile = "profile"
+		}
+		return m.styles.Warning.Render(fmt.Sprintf("Confirm switch to %s for %s? (y/n)", profile, agent))
+	}
 	return m.styles.Warning.Render(fmt.Sprintf("Confirm %s for %s? (y/n)", strings.ToLower(label), agent))
 }
 
@@ -3429,6 +3952,8 @@ func actionLabel(action string) string {
 		return "Pause"
 	case actionResume:
 		return "Resume"
+	case actionSwitchProfile:
+		return "Switch profile"
 	case actionView:
 		return "View"
 	default:
