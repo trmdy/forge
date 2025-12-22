@@ -58,10 +58,16 @@ func TestNodeRepository_Get(t *testing.T) {
 
 	// Create a node
 	node := &models.Node{
-		Name:       "test-node",
-		SSHTarget:  "user@host.example.com",
-		SSHBackend: models.SSHBackendAuto,
-		Status:     models.NodeStatusOnline,
+		Name:               "test-node",
+		SSHTarget:          "user@host.example.com",
+		SSHBackend:         models.SSHBackendAuto,
+		SSHAgentForwarding: true,
+		SSHProxyJump:       "jump.example.com",
+		SSHControlMaster:   "auto",
+		SSHControlPath:     "/tmp/ssh-%r@%h:%p",
+		SSHControlPersist:  "10m",
+		SSHTimeoutSeconds:  45,
+		Status:             models.NodeStatusOnline,
 		Metadata: models.NodeMetadata{
 			TmuxVersion: "3.3",
 			Platform:    "linux",
@@ -86,6 +92,24 @@ func TestNodeRepository_Get(t *testing.T) {
 	}
 	if retrieved.Status != node.Status {
 		t.Errorf("expected status %q, got %q", node.Status, retrieved.Status)
+	}
+	if retrieved.SSHAgentForwarding != node.SSHAgentForwarding {
+		t.Errorf("expected agent forwarding %v, got %v", node.SSHAgentForwarding, retrieved.SSHAgentForwarding)
+	}
+	if retrieved.SSHProxyJump != node.SSHProxyJump {
+		t.Errorf("expected proxy jump %q, got %q", node.SSHProxyJump, retrieved.SSHProxyJump)
+	}
+	if retrieved.SSHControlMaster != node.SSHControlMaster {
+		t.Errorf("expected control master %q, got %q", node.SSHControlMaster, retrieved.SSHControlMaster)
+	}
+	if retrieved.SSHControlPath != node.SSHControlPath {
+		t.Errorf("expected control path %q, got %q", node.SSHControlPath, retrieved.SSHControlPath)
+	}
+	if retrieved.SSHControlPersist != node.SSHControlPersist {
+		t.Errorf("expected control persist %q, got %q", node.SSHControlPersist, retrieved.SSHControlPersist)
+	}
+	if retrieved.SSHTimeoutSeconds != node.SSHTimeoutSeconds {
+		t.Errorf("expected timeout seconds %d, got %d", node.SSHTimeoutSeconds, retrieved.SSHTimeoutSeconds)
 	}
 	if retrieved.Metadata.TmuxVersion != node.Metadata.TmuxVersion {
 		t.Errorf("expected tmux_version %q, got %q", node.Metadata.TmuxVersion, retrieved.Metadata.TmuxVersion)

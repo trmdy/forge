@@ -56,15 +56,23 @@ func (r *NodeRepository) Create(ctx context.Context, node *models.Node) error {
 
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO nodes (
-			id, name, ssh_target, ssh_backend, ssh_key_path, status, 
-			is_local, last_seen_at, metadata_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, name, ssh_target, ssh_backend, ssh_key_path,
+			ssh_agent_forwarding, ssh_proxy_jump, ssh_control_master,
+			ssh_control_path, ssh_control_persist, ssh_timeout_seconds,
+			status, is_local, last_seen_at, metadata_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		node.ID,
 		node.Name,
 		node.SSHTarget,
 		string(node.SSHBackend),
 		node.SSHKeyPath,
+		boolToInt(node.SSHAgentForwarding),
+		node.SSHProxyJump,
+		node.SSHControlMaster,
+		node.SSHControlPath,
+		node.SSHControlPersist,
+		node.SSHTimeoutSeconds,
 		string(node.Status),
 		boolToInt(node.IsLocal),
 		lastSeen,
@@ -87,7 +95,9 @@ func (r *NodeRepository) Create(ctx context.Context, node *models.Node) error {
 func (r *NodeRepository) Get(ctx context.Context, id string) (*models.Node, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT 
-			id, name, ssh_target, ssh_backend, ssh_key_path, status,
+			id, name, ssh_target, ssh_backend, ssh_key_path,
+			ssh_agent_forwarding, ssh_proxy_jump, ssh_control_master, ssh_control_path,
+			ssh_control_persist, ssh_timeout_seconds, status,
 			is_local, last_seen_at, metadata_json, created_at, updated_at
 		FROM nodes WHERE id = ?
 	`, id)
@@ -99,7 +109,9 @@ func (r *NodeRepository) Get(ctx context.Context, id string) (*models.Node, erro
 func (r *NodeRepository) GetByName(ctx context.Context, name string) (*models.Node, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT 
-			id, name, ssh_target, ssh_backend, ssh_key_path, status,
+			id, name, ssh_target, ssh_backend, ssh_key_path,
+			ssh_agent_forwarding, ssh_proxy_jump, ssh_control_master, ssh_control_path,
+			ssh_control_persist, ssh_timeout_seconds, status,
 			is_local, last_seen_at, metadata_json, created_at, updated_at
 		FROM nodes WHERE name = ?
 	`, name)
@@ -115,7 +127,9 @@ func (r *NodeRepository) List(ctx context.Context, status *models.NodeStatus) ([
 	if status != nil {
 		rows, err = r.db.QueryContext(ctx, `
 			SELECT 
-				id, name, ssh_target, ssh_backend, ssh_key_path, status,
+				id, name, ssh_target, ssh_backend, ssh_key_path,
+				ssh_agent_forwarding, ssh_proxy_jump, ssh_control_master, ssh_control_path,
+				ssh_control_persist, ssh_timeout_seconds, status,
 				is_local, last_seen_at, metadata_json, created_at, updated_at
 			FROM nodes WHERE status = ?
 			ORDER BY name
@@ -123,7 +137,9 @@ func (r *NodeRepository) List(ctx context.Context, status *models.NodeStatus) ([
 	} else {
 		rows, err = r.db.QueryContext(ctx, `
 			SELECT 
-				id, name, ssh_target, ssh_backend, ssh_key_path, status,
+				id, name, ssh_target, ssh_backend, ssh_key_path,
+				ssh_agent_forwarding, ssh_proxy_jump, ssh_control_master, ssh_control_path,
+				ssh_control_persist, ssh_timeout_seconds, status,
 				is_local, last_seen_at, metadata_json, created_at, updated_at
 			FROM nodes ORDER BY name
 		`)
@@ -175,6 +191,12 @@ func (r *NodeRepository) Update(ctx context.Context, node *models.Node) error {
 			ssh_target = ?,
 			ssh_backend = ?,
 			ssh_key_path = ?,
+			ssh_agent_forwarding = ?,
+			ssh_proxy_jump = ?,
+			ssh_control_master = ?,
+			ssh_control_path = ?,
+			ssh_control_persist = ?,
+			ssh_timeout_seconds = ?,
 			status = ?,
 			is_local = ?,
 			last_seen_at = ?,
@@ -186,6 +208,12 @@ func (r *NodeRepository) Update(ctx context.Context, node *models.Node) error {
 		node.SSHTarget,
 		string(node.SSHBackend),
 		node.SSHKeyPath,
+		boolToInt(node.SSHAgentForwarding),
+		node.SSHProxyJump,
+		node.SSHControlMaster,
+		node.SSHControlPath,
+		node.SSHControlPersist,
+		node.SSHTimeoutSeconds,
 		string(node.Status),
 		boolToInt(node.IsLocal),
 		lastSeen,
@@ -278,6 +306,9 @@ func (r *NodeRepository) scanNode(row *sql.Row) (*models.Node, error) {
 	var node models.Node
 	var sshBackend, status string
 	var isLocal int
+	var agentForwarding int
+	var proxyJump, controlMaster, controlPath, controlPersist sql.NullString
+	var timeoutSeconds sql.NullInt64
 	var lastSeen, metadataJSON sql.NullString
 	var createdAt, updatedAt string
 
@@ -287,6 +318,12 @@ func (r *NodeRepository) scanNode(row *sql.Row) (*models.Node, error) {
 		&node.SSHTarget,
 		&sshBackend,
 		&node.SSHKeyPath,
+		&agentForwarding,
+		&proxyJump,
+		&controlMaster,
+		&controlPath,
+		&controlPersist,
+		&timeoutSeconds,
 		&status,
 		&isLocal,
 		&lastSeen,
@@ -305,6 +342,22 @@ func (r *NodeRepository) scanNode(row *sql.Row) (*models.Node, error) {
 	node.SSHBackend = models.SSHBackend(sshBackend)
 	node.Status = models.NodeStatus(status)
 	node.IsLocal = isLocal != 0
+	node.SSHAgentForwarding = agentForwarding != 0
+	if proxyJump.Valid {
+		node.SSHProxyJump = proxyJump.String
+	}
+	if controlMaster.Valid {
+		node.SSHControlMaster = controlMaster.String
+	}
+	if controlPath.Valid {
+		node.SSHControlPath = controlPath.String
+	}
+	if controlPersist.Valid {
+		node.SSHControlPersist = controlPersist.String
+	}
+	if timeoutSeconds.Valid {
+		node.SSHTimeoutSeconds = int(timeoutSeconds.Int64)
+	}
 
 	if lastSeen.Valid {
 		t, err := time.Parse(time.RFC3339, lastSeen.String)
@@ -334,6 +387,9 @@ func (r *NodeRepository) scanNodeFromRows(rows *sql.Rows) (*models.Node, error) 
 	var node models.Node
 	var sshBackend, status string
 	var isLocal int
+	var agentForwarding int
+	var proxyJump, controlMaster, controlPath, controlPersist sql.NullString
+	var timeoutSeconds sql.NullInt64
 	var lastSeen, metadataJSON sql.NullString
 	var createdAt, updatedAt string
 
@@ -343,6 +399,12 @@ func (r *NodeRepository) scanNodeFromRows(rows *sql.Rows) (*models.Node, error) 
 		&node.SSHTarget,
 		&sshBackend,
 		&node.SSHKeyPath,
+		&agentForwarding,
+		&proxyJump,
+		&controlMaster,
+		&controlPath,
+		&controlPersist,
+		&timeoutSeconds,
 		&status,
 		&isLocal,
 		&lastSeen,
@@ -358,6 +420,22 @@ func (r *NodeRepository) scanNodeFromRows(rows *sql.Rows) (*models.Node, error) 
 	node.SSHBackend = models.SSHBackend(sshBackend)
 	node.Status = models.NodeStatus(status)
 	node.IsLocal = isLocal != 0
+	node.SSHAgentForwarding = agentForwarding != 0
+	if proxyJump.Valid {
+		node.SSHProxyJump = proxyJump.String
+	}
+	if controlMaster.Valid {
+		node.SSHControlMaster = controlMaster.String
+	}
+	if controlPath.Valid {
+		node.SSHControlPath = controlPath.String
+	}
+	if controlPersist.Valid {
+		node.SSHControlPersist = controlPersist.String
+	}
+	if timeoutSeconds.Valid {
+		node.SSHTimeoutSeconds = int(timeoutSeconds.Int64)
+	}
 
 	if lastSeen.Valid {
 		t, err := time.Parse(time.RFC3339, lastSeen.String)
