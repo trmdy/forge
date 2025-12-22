@@ -71,6 +71,9 @@ type DetectionResult struct {
 
 	// ScreenHash is a hash of the screen content (for change detection).
 	ScreenHash string
+
+	// UsageMetrics contains parsed usage metrics when available.
+	UsageMetrics *models.UsageMetrics
 }
 
 // Engine manages agent state detection and notifications.
@@ -109,7 +112,7 @@ func (e *Engine) GetState(ctx context.Context, agentID string) (*models.StateInf
 }
 
 // UpdateState updates an agent's state and notifies subscribers.
-func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.AgentState, info models.StateInfo) error {
+func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.AgentState, info models.StateInfo, usage *models.UsageMetrics) error {
 	agent, err := e.repo.Get(ctx, agentID)
 	if err != nil {
 		if errors.Is(err, db.ErrAgentNotFound) {
@@ -125,8 +128,19 @@ func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.A
 	agent.StateInfo = info
 	now := time.Now().UTC()
 	agent.LastActivity = &now
+	if usage != nil {
+		agent.Metadata.UsageMetrics = usage
+	}
 
-	if err := e.repo.Update(ctx, agent); err != nil {
+	if previousState != state && e.eventRepo != nil {
+		event, err := buildStateChangeEvent(agentID, previousState, state, info, now)
+		if err != nil {
+			return err
+		}
+		if err := e.repo.UpdateWithEvent(ctx, agent, event, e.eventRepo); err != nil {
+			return err
+		}
+	} else if err := e.repo.Update(ctx, agent); err != nil {
 		return err
 	}
 
@@ -141,12 +155,6 @@ func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.A
 		}
 		e.notifySubscribers(change)
 
-		// Log state change event
-		if e.eventRepo != nil {
-			if err := e.logStateChange(ctx, agentID, previousState, state, info); err != nil {
-				e.logger.Warn().Err(err).Str("agent_id", agentID).Msg("failed to log state change event")
-			}
-		}
 	}
 
 	return nil
@@ -189,12 +197,23 @@ func (e *Engine) DetectState(ctx context.Context, agentID string) (*DetectionRes
 		return nil, err
 	}
 
+	var usage *models.UsageMetrics
+	if extractor, ok := adapter.(adapters.UsageMetricsExtractor); ok {
+		metrics, matched, err := extractor.ExtractUsageMetrics(screen)
+		if err != nil {
+			e.logger.Debug().Err(err).Str("agent_id", agentID).Msg("failed to extract usage metrics")
+		} else if matched && metrics != nil {
+			usage = metrics
+		}
+	}
+
 	result := &DetectionResult{
-		State:      state,
-		Confidence: reason.Confidence,
-		Reason:     reason.Reason,
-		Evidence:   reason.Evidence,
-		ScreenHash: screenHash,
+		State:        state,
+		Confidence:   reason.Confidence,
+		Reason:       reason.Reason,
+		Evidence:     reason.Evidence,
+		ScreenHash:   screenHash,
+		UsageMetrics: usage,
 	}
 
 	// Apply rule-based inference on top of adapter result when needed.
@@ -217,7 +236,7 @@ func (e *Engine) DetectAndUpdate(ctx context.Context, agentID string) (*Detectio
 		DetectedAt: time.Now().UTC(),
 	}
 
-	if err := e.UpdateState(ctx, agentID, result.State, info); err != nil {
+	if err := e.UpdateState(ctx, agentID, result.State, info, result.UsageMetrics); err != nil {
 		return nil, err
 	}
 
@@ -382,12 +401,15 @@ func (e *Engine) logStateChange(ctx context.Context, agentID string, oldState, n
 		return nil
 	}
 
-	event := &models.Event{
-		Type:       models.EventTypeAgentStateChanged,
-		EntityType: models.EntityTypeAgent,
-		EntityID:   agentID,
+	event, err := buildStateChangeEvent(agentID, oldState, newState, info, time.Time{})
+	if err != nil {
+		return err
 	}
 
+	return e.eventRepo.Create(ctx, event)
+}
+
+func buildStateChangeEvent(agentID string, oldState, newState models.AgentState, info models.StateInfo, timestamp time.Time) (*models.Event, error) {
 	payload := models.StateChangedPayload{
 		OldState:   oldState,
 		NewState:   newState,
@@ -397,9 +419,17 @@ func (e *Engine) logStateChange(ctx context.Context, agentID string, oldState, n
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	event.Payload = payloadBytes
 
-	return e.eventRepo.Create(ctx, event)
+	event := &models.Event{
+		Type:       models.EventTypeAgentStateChanged,
+		EntityType: models.EntityTypeAgent,
+		EntityID:   agentID,
+		Payload:    payloadBytes,
+	}
+	if !timestamp.IsZero() {
+		event.Timestamp = timestamp
+	}
+	return event, nil
 }

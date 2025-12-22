@@ -63,3 +63,8 @@ type AgentAdapter interface {
 	// SupportsDiffMetadata indicates if the adapter reports diff metadata.
 	SupportsDiffMetadata() bool
 }
+
+// UsageMetricsExtractor allows adapters to extract usage metrics from screen output.
+type UsageMetricsExtractor interface {
+	ExtractUsageMetrics(screen string) (*models.UsageMetrics, bool, error)
+}

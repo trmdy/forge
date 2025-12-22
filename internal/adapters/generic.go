@@ -212,21 +212,8 @@ var _ AgentAdapter = (*GenericAdapter)(nil)
 // Built-in generic adapters for common agent types
 
 // OpenCodeAdapter creates an adapter for OpenCode CLI.
-func OpenCodeAdapter() *GenericAdapter {
-	return NewGenericAdapter(
-		string(models.AgentTypeOpenCode),
-		"opencode",
-		WithIdleIndicators(
-			"❯",
-			"opencode>",
-			"waiting for input",
-		),
-		WithBusyIndicators(
-			"thinking",
-			"generating",
-			"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
-		),
-	)
+func OpenCodeAdapter() AgentAdapter {
+	return NewOpenCodeAdapter()
 }
 
 // ClaudeCodeAdapter creates an adapter for Claude Code CLI.

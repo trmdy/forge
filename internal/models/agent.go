@@ -125,6 +125,54 @@ type AgentMetadata struct {
 
 	// Environment contains environment variable overrides.
 	Environment map[string]string `json:"environment,omitempty"`
+
+	// UsageMetrics captures best-effort usage data from adapters.
+	UsageMetrics *UsageMetrics `json:"usage_metrics,omitempty"`
+}
+
+// UsageMetrics contains usage metrics captured from an agent runtime.
+type UsageMetrics struct {
+	// Sessions is the number of sessions in the usage window.
+	Sessions int64 `json:"sessions,omitempty"`
+
+	// Messages is the number of messages in the usage window.
+	Messages int64 `json:"messages,omitempty"`
+
+	// Days is the number of days in the usage window.
+	Days int64 `json:"days,omitempty"`
+
+	// TotalCostCents is the total cost in cents.
+	TotalCostCents int64 `json:"total_cost_cents,omitempty"`
+
+	// AvgCostPerDayCents is the average cost per day in cents.
+	AvgCostPerDayCents int64 `json:"avg_cost_per_day_cents,omitempty"`
+
+	// AvgTokensPerSession is the average tokens per session.
+	AvgTokensPerSession int64 `json:"avg_tokens_per_session,omitempty"`
+
+	// MedianTokensPerSession is the median tokens per session.
+	MedianTokensPerSession int64 `json:"median_tokens_per_session,omitempty"`
+
+	// InputTokens is the number of input tokens in the usage window.
+	InputTokens int64 `json:"input_tokens,omitempty"`
+
+	// OutputTokens is the number of output tokens in the usage window.
+	OutputTokens int64 `json:"output_tokens,omitempty"`
+
+	// CacheReadTokens is the number of cache read tokens in the usage window.
+	CacheReadTokens int64 `json:"cache_read_tokens,omitempty"`
+
+	// CacheWriteTokens is the number of cache write tokens in the usage window.
+	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
+
+	// TotalTokens is the total tokens in the usage window.
+	TotalTokens int64 `json:"total_tokens,omitempty"`
+
+	// Source indicates where the metrics were derived from.
+	Source string `json:"source,omitempty"`
+
+	// UpdatedAt is when the metrics were captured.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Validate checks if the agent configuration is valid.
