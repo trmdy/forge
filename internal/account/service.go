@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,9 +18,10 @@ import (
 
 // Service errors.
 var (
-	ErrAccountNotFound    = errors.New("account not found")
-	ErrNoAvailableAccount = errors.New("no available account")
-	ErrAccountOnCooldown  = errors.New("account is on cooldown")
+	ErrAccountNotFound      = errors.New("account not found")
+	ErrAccountAlreadyExists = errors.New("account already exists")
+	ErrNoAvailableAccount   = errors.New("no available account")
+	ErrAccountOnCooldown    = errors.New("account is on cooldown")
 )
 
 // Service manages accounts and their cooldown status.
@@ -53,6 +55,89 @@ func NewService(cfg *config.Config) *Service {
 	}
 
 	return s
+}
+
+// AddAccount adds a new account to the service.
+func (s *Service) AddAccount(ctx context.Context, account *models.Account) error {
+	if account == nil {
+		return errors.New("account is nil")
+	}
+	if err := account.Validate(); err != nil {
+		return err
+	}
+
+	if account.ID == "" {
+		account.ID = account.ProfileName
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.accounts[account.ID]; exists {
+		return ErrAccountAlreadyExists
+	}
+
+	now := time.Now().UTC()
+	if account.CreatedAt.IsZero() {
+		account.CreatedAt = now
+	}
+	account.UpdatedAt = now
+
+	s.accounts[account.ID] = account
+	return nil
+}
+
+// ListAccounts returns accounts filtered by provider when provided.
+func (s *Service) ListAccounts(ctx context.Context, provider models.Provider) ([]*models.Account, error) {
+	if provider == "" {
+		return s.List(ctx), nil
+	}
+	return s.ListByProvider(ctx, provider), nil
+}
+
+// GetAccount retrieves an account by ID.
+func (s *Service) GetAccount(ctx context.Context, id string) (*models.Account, error) {
+	return s.Get(ctx, id)
+}
+
+// DeleteAccount removes an account by ID.
+func (s *Service) DeleteAccount(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.accounts[id]; !exists {
+		return ErrAccountNotFound
+	}
+
+	delete(s.accounts, id)
+	return nil
+}
+
+// GetNextAvailable returns the next available account for a provider.
+func (s *Service) GetNextAvailable(ctx context.Context, provider models.Provider) (*models.Account, error) {
+	if provider == "" {
+		return nil, models.ErrInvalidProvider
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var candidates []*models.Account
+	for _, account := range s.accounts {
+		if account.Provider == provider && account.IsAvailable() {
+			candidates = append(candidates, account)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return nil, ErrNoAvailableAccount
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].ProfileName < candidates[j].ProfileName
+	})
+
+	return candidates[0], nil
 }
 
 // Get retrieves an account by ID.
