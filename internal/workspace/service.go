@@ -27,14 +27,16 @@ var (
 type Service struct {
 	repo        *db.WorkspaceRepository
 	nodeService *node.Service
+	agentRepo   *db.AgentRepository
 	logger      zerolog.Logger
 }
 
 // NewService creates a new WorkspaceService.
-func NewService(repo *db.WorkspaceRepository, nodeService *node.Service) *Service {
+func NewService(repo *db.WorkspaceRepository, nodeService *node.Service, agentRepo *db.AgentRepository) *Service {
 	return &Service{
 		repo:        repo,
 		nodeService: nodeService,
+		agentRepo:   agentRepo,
 		logger:      logging.Component("workspace"),
 	}
 }
@@ -357,7 +359,26 @@ func (s *Service) GetWorkspaceStatus(ctx context.Context, id string) (*Workspace
 	// For now, just use total count
 	result.ActiveAgents = workspace.AgentCount
 
-	// TODO: Get alerts from agent states
+	// Populate alerts from agent states when available.
+	if s.agentRepo != nil {
+		agents, err := s.agentRepo.ListByWorkspace(ctx, workspace.ID)
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("failed to list agents for alerts")
+		} else {
+			result.Alerts = append(result.Alerts, buildAlerts(agents)...)
+
+			for _, agent := range agents {
+				switch agent.State {
+				case models.AgentStateWorking:
+					result.ActiveAgents++
+				case models.AgentStateIdle:
+					result.IdleAgents++
+				case models.AgentStateAwaitingApproval, models.AgentStateRateLimited, models.AgentStateError:
+					result.BlockedAgents++
+				}
+			}
+		}
+	}
 
 	return result, nil
 }
@@ -442,6 +463,56 @@ func (s *Service) UnmanageWorkspace(ctx context.Context, id string) error {
 	return nil
 }
 
+// DestroyWorkspace kills the tmux session (if local) and removes the workspace record.
+func (s *Service) DestroyWorkspace(ctx context.Context, id string) error {
+	workspace, err := s.repo.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, db.ErrWorkspaceNotFound) {
+			return ErrWorkspaceNotFound
+		}
+		return fmt.Errorf("failed to get workspace: %w", err)
+	}
+
+	nodeObj, err := s.nodeService.GetNode(ctx, workspace.NodeID)
+	if err != nil {
+		if errors.Is(err, node.ErrNodeNotFound) {
+			return ErrNodeNotFound
+		}
+		return fmt.Errorf("failed to get node: %w", err)
+	}
+
+	if !nodeObj.IsLocal {
+		return fmt.Errorf("remote workspace destroy not yet implemented")
+	}
+
+	if workspace.TmuxSession != "" {
+		client := tmux.NewLocalClient()
+		exists, err := client.HasSession(ctx, workspace.TmuxSession)
+		if err != nil {
+			return fmt.Errorf("failed to check tmux session: %w", err)
+		}
+		if exists {
+			if err := client.KillSession(ctx, workspace.TmuxSession); err != nil {
+				return fmt.Errorf("failed to kill tmux session %s: %w", workspace.TmuxSession, err)
+			}
+		}
+	}
+
+	if err := s.repo.Delete(ctx, id); err != nil {
+		if errors.Is(err, db.ErrWorkspaceNotFound) {
+			return ErrWorkspaceNotFound
+		}
+		return fmt.Errorf("failed to delete workspace: %w", err)
+	}
+
+	s.logger.Info().
+		Str("workspace_id", id).
+		Str("tmux_session", workspace.TmuxSession).
+		Msg("workspace destroyed")
+
+	return nil
+}
+
 // createTmuxSession creates a new tmux session for a workspace.
 func (s *Service) createTmuxSession(ctx context.Context, workspace *models.Workspace) error {
 	// For now, only support local node
@@ -487,4 +558,43 @@ func (s *Service) isTmuxSessionActive(ctx context.Context, nodeObj *models.Node,
 	}
 
 	return exists
+}
+
+func buildAlerts(agents []*models.Agent) []models.Alert {
+	alerts := make([]models.Alert, 0)
+
+	for _, agent := range agents {
+		switch agent.State {
+		case models.AgentStateAwaitingApproval:
+			alerts = append(alerts, models.Alert{
+				Type:     models.AlertTypeApprovalNeeded,
+				Severity: models.AlertSeverityWarning,
+				Message:  "Approval needed",
+				AgentID:  agent.ID,
+			})
+		case models.AgentStateRateLimited:
+			alerts = append(alerts, models.Alert{
+				Type:     models.AlertTypeRateLimit,
+				Severity: models.AlertSeverityWarning,
+				Message:  "Agent rate limited",
+				AgentID:  agent.ID,
+			})
+		case models.AgentStateError:
+			alerts = append(alerts, models.Alert{
+				Type:     models.AlertTypeError,
+				Severity: models.AlertSeverityError,
+				Message:  "Agent error",
+				AgentID:  agent.ID,
+			})
+		case models.AgentStatePaused:
+			alerts = append(alerts, models.Alert{
+				Type:     models.AlertTypeCooldown,
+				Severity: models.AlertSeverityInfo,
+				Message:  "Agent paused",
+				AgentID:  agent.ID,
+			})
+		}
+	}
+
+	return alerts
 }
