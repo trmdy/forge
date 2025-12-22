@@ -74,6 +74,9 @@ type DetectionResult struct {
 
 	// UsageMetrics contains parsed usage metrics when available.
 	UsageMetrics *models.UsageMetrics
+
+	// DiffMetadata contains parsed diff metadata when available.
+	DiffMetadata *models.DiffMetadata
 }
 
 // Engine manages agent state detection and notifications.
@@ -112,7 +115,7 @@ func (e *Engine) GetState(ctx context.Context, agentID string) (*models.StateInf
 }
 
 // UpdateState updates an agent's state and notifies subscribers.
-func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.AgentState, info models.StateInfo, usage *models.UsageMetrics) error {
+func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.AgentState, info models.StateInfo, usage *models.UsageMetrics, diff *models.DiffMetadata) error {
 	agent, err := e.repo.Get(ctx, agentID)
 	if err != nil {
 		if errors.Is(err, db.ErrAgentNotFound) {
@@ -130,6 +133,9 @@ func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.A
 	agent.LastActivity = &now
 	if usage != nil {
 		agent.Metadata.UsageMetrics = usage
+	}
+	if diff != nil {
+		agent.Metadata.DiffMetadata = diff
 	}
 
 	if previousState != state && e.eventRepo != nil {
@@ -207,6 +213,16 @@ func (e *Engine) DetectState(ctx context.Context, agentID string) (*DetectionRes
 		}
 	}
 
+	var diff *models.DiffMetadata
+	if extractor, ok := adapter.(adapters.DiffMetadataExtractor); ok {
+		metadata, matched, err := extractor.ExtractDiffMetadata(screen)
+		if err != nil {
+			e.logger.Debug().Err(err).Str("agent_id", agentID).Msg("failed to extract diff metadata")
+		} else if matched && metadata != nil {
+			diff = metadata
+		}
+	}
+
 	result := &DetectionResult{
 		State:        state,
 		Confidence:   reason.Confidence,
@@ -214,6 +230,7 @@ func (e *Engine) DetectState(ctx context.Context, agentID string) (*DetectionRes
 		Evidence:     reason.Evidence,
 		ScreenHash:   screenHash,
 		UsageMetrics: usage,
+		DiffMetadata: diff,
 	}
 
 	// Apply rule-based inference on top of adapter result when needed.
@@ -236,7 +253,7 @@ func (e *Engine) DetectAndUpdate(ctx context.Context, agentID string) (*Detectio
 		DetectedAt: time.Now().UTC(),
 	}
 
-	if err := e.UpdateState(ctx, agentID, result.State, info, result.UsageMetrics); err != nil {
+	if err := e.UpdateState(ctx, agentID, result.State, info, result.UsageMetrics, result.DiffMetadata); err != nil {
 		return nil, err
 	}
 

@@ -128,6 +128,9 @@ type AgentMetadata struct {
 
 	// UsageMetrics captures best-effort usage data from adapters.
 	UsageMetrics *UsageMetrics `json:"usage_metrics,omitempty"`
+
+	// DiffMetadata captures best-effort diff data from adapters.
+	DiffMetadata *DiffMetadata `json:"diff_metadata,omitempty"`
 }
 
 // UsageMetrics contains usage metrics captured from an agent runtime.
@@ -172,6 +175,30 @@ type UsageMetrics struct {
 	Source string `json:"source,omitempty"`
 
 	// UpdatedAt is when the metrics were captured.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// DiffMetadata contains diff metadata captured from an agent runtime.
+type DiffMetadata struct {
+	// Files lists modified file paths.
+	Files []string `json:"files,omitempty"`
+
+	// FilesChanged is the number of files changed.
+	FilesChanged int64 `json:"files_changed,omitempty"`
+
+	// Insertions is the number of inserted lines.
+	Insertions int64 `json:"insertions,omitempty"`
+
+	// Deletions is the number of deleted lines.
+	Deletions int64 `json:"deletions,omitempty"`
+
+	// Commits lists related commit references.
+	Commits []string `json:"commits,omitempty"`
+
+	// Source indicates where the metadata was derived from.
+	Source string `json:"source,omitempty"`
+
+	// UpdatedAt is when the metadata was captured.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
