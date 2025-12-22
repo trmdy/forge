@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -21,6 +22,8 @@ type WorkspaceGrid struct {
 	Width         int
 	Height        int
 	Columns       int
+	PulseFrame    int
+	PulseEvents   map[string][]time.Time
 }
 
 // NewWorkspaceGrid creates a new workspace grid.
@@ -166,7 +169,7 @@ func (g *WorkspaceGrid) ensureVisible() {
 	}
 
 	// Calculate visible rows (assuming ~3 lines per card)
-	cardHeight := 4
+	cardHeight := 5
 	visibleRows := g.Height / cardHeight
 	if visibleRows < 1 {
 		visibleRows = 1
@@ -216,7 +219,8 @@ func (g *WorkspaceGrid) Render(styleSet styles.Styles) string {
 			idx := i + j
 			ws := filtered[idx]
 			isSelected := idx == g.SelectedIndex
-			card := renderGridCard(styleSet, ws, isSelected, cardWidth)
+			events := g.pulseEventsFor(ws)
+			card := renderGridCard(styleSet, ws, isSelected, cardWidth, g.PulseFrame, events)
 			cards = append(cards, card)
 		}
 		row := lipgloss.JoinHorizontal(lipgloss.Top, cards...)
@@ -248,8 +252,20 @@ func (g *WorkspaceGrid) Render(styleSet styles.Styles) string {
 	return grid
 }
 
+func (g *WorkspaceGrid) pulseEventsFor(ws *models.Workspace) []time.Time {
+	if ws == nil || g.PulseEvents == nil {
+		return nil
+	}
+	if ws.ID != "" {
+		if events, ok := g.PulseEvents[ws.ID]; ok {
+			return events
+		}
+	}
+	return nil
+}
+
 // renderGridCard renders a single workspace card for the grid.
-func renderGridCard(styleSet styles.Styles, ws *models.Workspace, selected bool, width int) string {
+func renderGridCard(styleSet styles.Styles, ws *models.Workspace, selected bool, width int, pulseFrame int, events []time.Time) string {
 	if width < 20 {
 		width = 20
 	}
@@ -273,6 +289,8 @@ func renderGridCard(styleSet styles.Styles, ws *models.Workspace, selected bool,
 		}
 	}
 
+	pulseLine := renderPulseLine(styleSet, ws, pulseFrame, events)
+
 	// Agent count
 	agentLine := styleSet.Text.Render(fmt.Sprintf("  Agents: %d", ws.AgentCount))
 
@@ -292,6 +310,7 @@ func renderGridCard(styleSet styles.Styles, ws *models.Workspace, selected bool,
 	if branchLine != "" {
 		lines = append(lines, branchLine)
 	}
+	lines = append(lines, pulseLine)
 	lines = append(lines, agentLine)
 	if alertLine != "" {
 		lines = append(lines, alertLine)
@@ -342,6 +361,85 @@ func renderWorkspaceStatus(styleSet styles.Styles, status models.WorkspaceStatus
 	default:
 		return styleSet.Muted.Render("[?]")
 	}
+}
+
+func renderPulseLine(styleSet styles.Styles, ws *models.Workspace, pulseFrame int, events []time.Time) string {
+	label := styleSet.Muted.Render("  Pulse:")
+	if ws == nil {
+		return fmt.Sprintf("%s %s", label, styleSet.Muted.Render("idle"))
+	}
+
+	state := workspacePulseState(ws)
+	indicator := pulseStyleForState(styleSet, state).Render(pulseIndicator(pulseFrame))
+
+	if len(events) > 0 {
+		pulse := ActivityPulse{
+			RecentEvents: events,
+			CurrentState: state,
+		}
+		sparkline := RenderActivitySparkline(styleSet, pulse, 8)
+		return fmt.Sprintf("%s %s %s", label, sparkline, indicator)
+	}
+
+	if workspaceHasActivity(ws) {
+		return fmt.Sprintf("%s %s", label, indicator)
+	}
+	return fmt.Sprintf("%s %s", label, styleSet.Muted.Render("idle"))
+}
+
+func workspaceHasActivity(ws *models.Workspace) bool {
+	if ws == nil {
+		return false
+	}
+	stats := ws.AgentStats
+	if stats.Working > 0 || stats.Blocked > 0 || stats.Error > 0 {
+		return true
+	}
+	return ws.AgentCount > 0
+}
+
+func workspacePulseState(ws *models.Workspace) models.AgentState {
+	if ws == nil {
+		return models.AgentStateIdle
+	}
+	if ws.Status == models.WorkspaceStatusError || ws.AgentStats.Error > 0 {
+		return models.AgentStateError
+	}
+	if ws.AgentStats.Blocked > 0 {
+		return models.AgentStatePaused
+	}
+	if ws.AgentStats.Working > 0 {
+		return models.AgentStateWorking
+	}
+	if ws.AgentCount > 0 {
+		return models.AgentStateWorking
+	}
+	return models.AgentStateIdle
+}
+
+func pulseStyleForState(styleSet styles.Styles, state models.AgentState) lipgloss.Style {
+	switch state {
+	case models.AgentStateWorking:
+		return styleSet.Success
+	case models.AgentStateError:
+		return styleSet.Error
+	case models.AgentStatePaused, models.AgentStateRateLimited:
+		return styleSet.Warning
+	default:
+		return styleSet.Muted
+	}
+}
+
+func pulseIndicator(frame int) string {
+	frames := []string{"o...", ".o..", "..o.", "...o"}
+	if len(frames) == 0 {
+		return "...."
+	}
+	idx := frame % len(frames)
+	if idx < 0 {
+		idx = -idx
+	}
+	return frames[idx]
 }
 
 func truncate(s string, maxLen int) string {
