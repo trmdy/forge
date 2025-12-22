@@ -20,6 +20,7 @@ type NativeExecutor struct {
 	config  *xssh.ClientConfig
 	pool    *connectionPool
 	logger  zerolog.Logger
+	agent   *AgentConnection
 
 	// Callback for passphrase prompting
 	PassphrasePrompt PassphrasePrompt
@@ -95,6 +96,7 @@ func (e *NativeExecutor) buildConfig() (*xssh.ClientConfig, error) {
 	// Try ssh-agent first
 	agentConn, err := ConnectAgent()
 	if err == nil {
+		e.agent = agentConn
 		authMethods = append(authMethods, agentConn.AuthMethod())
 		e.logger.Debug().Msg("using ssh-agent for authentication")
 	}
@@ -220,7 +222,13 @@ func (e *NativeExecutor) StartSession() (Session, error) {
 
 // Close releases all resources held by the executor.
 func (e *NativeExecutor) Close() error {
-	return e.pool.closeAll()
+	err := e.pool.closeAll()
+	if e.agent != nil {
+		if agentErr := e.agent.Close(); err == nil {
+			err = agentErr
+		}
+	}
+	return err
 }
 
 // getConnection returns a pooled or new SSH client connection.
@@ -356,7 +364,31 @@ func (e *NativeExecutor) keepAlive(client *xssh.Client) {
 	}
 }
 
-// parseSSHTarget parses a user@host:port string.
+// ParseSSHTarget parses a user@host:port string into ConnectionOptions.
+// This is the public API for parsing SSH targets.
+func ParseSSHTarget(target string) (*ConnectionOptions, error) {
+	user, host, port := parseSSHTarget(target)
+	if host == "" {
+		return nil, fmt.Errorf("invalid SSH target: missing host")
+	}
+
+	opts := &ConnectionOptions{
+		Host: host,
+		User: user,
+	}
+
+	if port != "" {
+		var p int
+		if _, err := fmt.Sscanf(port, "%d", &p); err != nil {
+			return nil, fmt.Errorf("invalid port: %s", port)
+		}
+		opts.Port = p
+	}
+
+	return opts, nil
+}
+
+// parseSSHTarget parses a user@host:port string (internal helper).
 func parseSSHTarget(target string) (user, host, port string) {
 	// Extract user
 	if at := bytes.IndexByte([]byte(target), '@'); at >= 0 {
