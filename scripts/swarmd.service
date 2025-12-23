@@ -1,0 +1,14 @@
+[Unit]
+Description=Swarm node daemon
+After=network.target
+
+[Service]
+Type=simple
+User=swarm
+Group=swarm
+ExecStart=/usr/local/bin/swarmd
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
