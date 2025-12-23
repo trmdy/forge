@@ -10,6 +10,8 @@ var (
 	ErrSSHAgentUnavailable      = errors.New("ssh agent not available")
 	ErrHostKeyRejected          = errors.New("host key rejected")
 	ErrHostKeyPromptUnavailable = errors.New("host key prompt unavailable")
+	ErrPortForwardUnsupported   = errors.New("port forwarding not supported")
+	ErrPortForwardLocalRequired = errors.New("local port is required for port forwarding")
 )
 
 // ExitError represents a non-zero exit code from a remote command.
