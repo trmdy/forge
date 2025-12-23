@@ -90,6 +90,9 @@ type model struct {
 	auditItems             []auditItem
 	auditFilter            string
 	auditSelected          int
+	mailThreads            []mailThread
+	mailFilter             string
+	mailSelected           int
 	actionConfirmOpen      bool
 	actionConfirmAction    string
 	actionConfirmAgent     string
@@ -195,6 +198,20 @@ type auditItem struct {
 	Detail     string
 }
 
+type mailThread struct {
+	ID       string
+	Subject  string
+	Messages []mailMessage
+}
+
+type mailMessage struct {
+	ID        string
+	From      string
+	Body      string
+	CreatedAt time.Time
+	Read      bool
+}
+
 const (
 	minWidth             = 60
 	minHeight            = 15
@@ -216,6 +233,7 @@ func initialModel() model {
 	queueEditors := sampleQueueEditors()
 	approvals := sampleApprovals()
 	auditItems := sampleAuditItems()
+	mailThreads := sampleMailboxThreads()
 	return model{
 		styles:                styles.DefaultStyles(),
 		view:                  viewDashboard,
@@ -240,6 +258,8 @@ func initialModel() model {
 		approvalsMarked:       make(map[string]map[string]bool),
 		auditItems:            auditItems,
 		auditSelected:         0,
+		mailThreads:           mailThreads,
+		mailSelected:          0,
 		transcriptViewer:      tv,
 		transcriptPreview:     true,
 		transcriptAutoScroll:  true,
@@ -449,6 +469,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		if m.view == viewMailbox {
+			switch msg.String() {
+			case "up", "k":
+				m.moveMailSelection(-1)
+				return m, nil
+			case "down", "j":
+				m.moveMailSelection(1)
+				return m, nil
+			case "/":
+				m.openSearch(viewMailbox)
+				return m, nil
+			case "enter":
+				m.showInspector = true
+				return m, nil
+			}
+		}
 		if m.view == viewAgentDetail {
 			switch msg.String() {
 			case "p":
@@ -485,6 +521,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedView = m.view
 			m.closeSearch()
 			m.ensureAuditSelection(m.filteredAuditItems())
+		case "5":
+			m.view = viewMailbox
+			m.selectedView = m.view
+			m.closeSearch()
+			m.ensureMailSelection(m.filteredMailThreads())
 		case "g":
 			m.view = nextView(m.view)
 			m.selectedView = m.view
@@ -493,6 +534,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.syncAgentSelection()
 			} else if m.view == viewAudit {
 				m.ensureAuditSelection(m.filteredAuditItems())
+			} else if m.view == viewMailbox {
+				m.ensureMailSelection(m.filteredMailThreads())
 			}
 		case "left", "up":
 			if m.view != viewWorkspace {
@@ -512,7 +555,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+k", ":":
 			m.openPalette()
 		case "ctrl+l":
-			if m.view == viewWorkspace || m.view == viewAgent || m.view == viewAudit {
+			if m.view == viewWorkspace || m.view == viewAgent || m.view == viewAudit || m.view == viewMailbox {
 				m.clearSearchFilter(m.view)
 				m.setStatus(fmt.Sprintf("%s filter cleared.", viewLabel(m.view)), statusInfo)
 				return m, nil
@@ -654,6 +697,7 @@ const (
 	viewWorkspace
 	viewAgent
 	viewAudit
+	viewMailbox
 	viewAgentDetail // Full-screen agent detail view
 )
 
@@ -683,6 +727,8 @@ func nextView(current viewID) viewID {
 		return viewAgent
 	case viewAgent:
 		return viewAudit
+	case viewAudit:
+		return viewMailbox
 	default:
 		return viewDashboard
 	}
@@ -691,13 +737,15 @@ func nextView(current viewID) viewID {
 func prevView(current viewID) viewID {
 	switch current {
 	case viewDashboard:
-		return viewAudit
+		return viewMailbox
 	case viewWorkspace:
 		return viewDashboard
 	case viewAgent:
 		return viewWorkspace
 	case viewAudit:
 		return viewAgent
+	case viewMailbox:
+		return viewAudit
 	default:
 		return viewWorkspace
 	}
@@ -808,6 +856,8 @@ func (m *model) viewLines() []string {
 		return m.renderWithInspector(lines, "Agent inspector", m.agentInspectorLines())
 	case viewAudit:
 		return m.auditViewLines()
+	case viewMailbox:
+		return m.mailboxViewLines()
 	case viewAgentDetail:
 		return m.agentDetailView()
 	default:
@@ -1559,6 +1609,63 @@ func (m model) selectedAuditItem() (auditItem, bool) {
 	return items[idx], true
 }
 
+func (m model) filteredMailThreads() []mailThread {
+	return filterMailThreads(m.mailThreads, m.mailFilter)
+}
+
+func (m *model) ensureMailSelection(threads []mailThread) {
+	if len(threads) == 0 {
+		m.mailSelected = -1
+		return
+	}
+	idx := m.mailSelected
+	if idx < 0 {
+		idx = 0
+	} else if idx >= len(threads) {
+		idx = len(threads) - 1
+	}
+	m.mailSelected = idx
+}
+
+func (m *model) moveMailSelection(delta int) {
+	threads := m.filteredMailThreads()
+	if len(threads) == 0 {
+		m.mailSelected = -1
+		return
+	}
+	m.ensureMailSelection(threads)
+	next := m.mailSelected + delta
+	if next < 0 {
+		next = 0
+	} else if next >= len(threads) {
+		next = len(threads) - 1
+	}
+	m.mailSelected = next
+}
+
+func (m model) mailSelectedIndexFor(threads []mailThread) int {
+	if len(threads) == 0 {
+		return -1
+	}
+	idx := m.mailSelected
+	if idx < 0 {
+		return 0
+	}
+	if idx >= len(threads) {
+		return len(threads) - 1
+	}
+	return idx
+}
+
+func (m model) selectedMailThread() (mailThread, bool) {
+	threads := m.filteredMailThreads()
+	if len(threads) == 0 {
+		return mailThread{}, false
+	}
+	idx := m.mailSelectedIndexFor(threads)
+	return threads[idx], true
+}
+
 func (m model) agentInspectorLines() []string {
 	if m.queueEditorOpen {
 		return m.queueEditorLines()
@@ -1645,6 +1752,79 @@ func (m model) auditInspectorLines() []string {
 	}
 
 	return lines
+}
+
+func (m model) mailboxInspectorLines() []string {
+	thread, ok := m.selectedMailThread()
+	if !ok {
+		if strings.TrimSpace(m.mailFilter) != "" {
+			return []string{
+				m.styles.Warning.Render("No mailbox threads match filter."),
+				m.styles.Muted.Render("Press / to edit filter."),
+			}
+		}
+		return []string{m.styles.Muted.Render("No mailbox threads available.")}
+	}
+
+	maxWidth := m.inspectorContentWidth()
+	unread := mailThreadUnreadCount(thread)
+	unreadLabel := fmt.Sprintf("%d unread", unread)
+	if unread == 0 {
+		unreadLabel = "All read"
+	}
+
+	lines := []string{
+		m.styles.Text.Render("Thread"),
+		m.styles.Muted.Render(fmt.Sprintf("Subject: %s", defaultLabel(thread.Subject))),
+		m.styles.Muted.Render(fmt.Sprintf("Messages: %d", len(thread.Messages))),
+		m.styles.Muted.Render(fmt.Sprintf("Status: %s", unreadLabel)),
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, m.styles.Text.Render("Messages"))
+	for _, msg := range thread.Messages {
+		lines = append(lines, m.mailMessageLines(msg, maxWidth)...)
+	}
+
+	return lines
+}
+
+func (m model) mailMessageLines(msg mailMessage, maxWidth int) []string {
+	status := "read"
+	if !msg.Read {
+		status = "unread"
+	}
+	header := fmt.Sprintf("[%s] %s %s", status, msg.CreatedAt.Local().Format("15:04"), defaultLabel(msg.From))
+	lines := []string{m.styles.Muted.Render(header)}
+	body := strings.TrimSpace(msg.Body)
+	if body == "" {
+		return lines
+	}
+	lines = append(lines, wrapIndented(body, maxWidth, m.styles.Muted, "  ")...)
+	return lines
+}
+
+func mailThreadLastMessage(thread mailThread) *mailMessage {
+	if len(thread.Messages) == 0 {
+		return nil
+	}
+	lastIdx := 0
+	for i := 1; i < len(thread.Messages); i++ {
+		if thread.Messages[i].CreatedAt.After(thread.Messages[lastIdx].CreatedAt) {
+			lastIdx = i
+		}
+	}
+	return &thread.Messages[lastIdx]
+}
+
+func mailThreadUnreadCount(thread mailThread) int {
+	unread := 0
+	for _, msg := range thread.Messages {
+		if !msg.Read {
+			unread++
+		}
+	}
+	return unread
 }
 
 func (m model) queueEditorLines() []string {
@@ -1989,6 +2169,81 @@ func (m model) auditRowLine(item auditItem) string {
 		summary = "Event recorded"
 	}
 	return fmt.Sprintf("%-19s  %-18s  %-16s  %s", timestamp, eventType, entity, summary)
+}
+
+func (m model) mailboxViewLines() []string {
+	mainWidth := m.width
+	if m.showInspector {
+		if width, _, _, _ := m.inspectorLayout(); width > 0 {
+			mainWidth = width
+		}
+	}
+	if mainWidth <= 0 {
+		mainWidth = 80
+	}
+
+	lines := []string{
+		m.styles.Accent.Render("Mailbox"),
+		m.styles.Muted.Render("↑↓/jk: move | Enter: inspect | /: filter | Ctrl+L: clear"),
+	}
+	if line := m.searchLine(viewMailbox); line != "" {
+		lines = append(lines, line)
+	}
+	lines = append(lines, m.mailSearchStatusLines()...)
+	lines = append(lines, "")
+
+	threads := m.filteredMailThreads()
+	if len(threads) == 0 {
+		if strings.TrimSpace(m.mailFilter) != "" {
+			lines = append(lines, m.styles.Warning.Render("No mailbox threads match this filter."))
+			lines = append(lines, m.styles.Muted.Render("Press / to edit or clear the filter."))
+		} else {
+			lines = append(lines, m.styles.Muted.Render("No mailbox messages yet."))
+		}
+		return m.renderWithInspector(lines, "Mailbox inspector", m.mailboxInspectorLines())
+	}
+
+	header := fmt.Sprintf("%-5s  %-9s  %-12s  %s", "Time", "Unread", "From", "Subject")
+	lines = append(lines, m.styles.Muted.Render(truncateText(header, mainWidth)))
+
+	selectedIdx := m.mailSelectedIndexFor(threads)
+	for i, thread := range threads {
+		line := m.mailThreadLine(thread)
+		prefix := "  "
+		if i == selectedIdx {
+			prefix = "> "
+		}
+		line = prefix + line
+		if mainWidth > 0 {
+			line = truncateText(line, mainWidth)
+		}
+		if i == selectedIdx {
+			lines = append(lines, m.styles.Accent.Render(line))
+		} else {
+			lines = append(lines, m.styles.Text.Render(line))
+		}
+	}
+
+	return m.renderWithInspector(lines, "Mailbox inspector", m.mailboxInspectorLines())
+}
+
+func (m model) mailThreadLine(thread mailThread) string {
+	last := mailThreadLastMessage(thread)
+	timeLabel := "--"
+	from := "--"
+	if last != nil {
+		timeLabel = last.CreatedAt.Local().Format("15:04")
+		from = last.From
+	}
+	unread := mailThreadUnreadCount(thread)
+	unreadLabel := "0"
+	if unread > 0 {
+		unreadLabel = fmt.Sprintf("%d", unread)
+	}
+	unreadLabel = truncateText(unreadLabel, 9)
+	from = truncateText(from, 12)
+	subject := defaultLabel(thread.Subject)
+	return fmt.Sprintf("%-5s  %-9s  %-12s  %s", timeLabel, unreadLabel, from, subject)
 }
 
 // agentDetailView renders a full-screen agent detail view.
@@ -2458,6 +2713,7 @@ func (m model) breadcrumbLine() string {
 		m.styles.Muted.Render("Workspace"),
 		m.styles.Muted.Render("Agent"),
 		m.styles.Muted.Render("Audit"),
+		m.styles.Muted.Render("Mailbox"),
 	}
 
 	switch m.view {
@@ -2469,9 +2725,11 @@ func (m model) breadcrumbLine() string {
 		parts[2] = m.styles.Accent.Render("Agent")
 	case viewAudit:
 		parts[3] = m.styles.Accent.Render("Audit")
+	case viewMailbox:
+		parts[4] = m.styles.Accent.Render("Mailbox")
 	}
 
-	return fmt.Sprintf("%s > %s > %s > %s", parts[0], parts[1], parts[2], parts[3])
+	return fmt.Sprintf("%s > %s > %s > %s > %s", parts[0], parts[1], parts[2], parts[3], parts[4])
 }
 
 func (m model) navLine() string {
@@ -2479,7 +2737,8 @@ func (m model) navLine() string {
 	ws := m.navLabel(viewWorkspace)
 	agent := m.navLabel(viewAgent)
 	audit := m.navLabel(viewAudit)
-	return fmt.Sprintf("Navigate: %s  %s  %s  %s", dash, ws, agent, audit)
+	mail := m.navLabel(viewMailbox)
+	return fmt.Sprintf("Navigate: %s  %s  %s  %s  %s", dash, ws, agent, audit, mail)
 }
 
 func (m model) navLabel(view viewID) string {
@@ -2534,6 +2793,8 @@ func viewLabel(view viewID) string {
 		return "Agent"
 	case viewAudit:
 		return "Audit"
+	case viewMailbox:
+		return "Mailbox"
 	case viewAgentDetail:
 		return "Agent Detail"
 	default:
@@ -2559,7 +2820,7 @@ func (m model) helpLines() []string {
 
 	switch m.view {
 	case viewDashboard:
-		lines = append(lines, m.styles.Muted.Render("Views: 1/2/3/4 switch | g cycle"))
+		lines = append(lines, m.styles.Muted.Render("Views: 1/2/3/4/5 switch | g cycle"))
 	case viewWorkspace:
 		lines = append(lines, m.styles.Muted.Render("Workspace: ↑↓←→/hjkl move | Enter open | / filter | Ctrl+L clear | A approvals"))
 	case viewAgent:
@@ -2576,6 +2837,8 @@ func (m model) helpLines() []string {
 		lines = append(lines, m.styles.Muted.Render("Actions: I interrupt | R restart | E export"))
 	case viewAudit:
 		lines = append(lines, m.styles.Muted.Render("Audit: ↑↓/jk move | Enter inspect | / filter | Ctrl+L clear"))
+	case viewMailbox:
+		lines = append(lines, m.styles.Muted.Render("Mailbox: ↑↓/jk move | Enter inspect | / filter | Ctrl+L clear"))
 	case viewAgentDetail:
 		lines = append(lines, m.styles.Muted.Render("Agent detail: p profile | I interrupt | R restart | P pause | Esc back"))
 	}
@@ -2658,6 +2921,7 @@ func (m model) paletteActions() []paletteAction {
 		{ID: "view.workspace", Label: "Navigate to workspace", Hint: "2"},
 		{ID: "view.agent", Label: "Navigate to agents", Hint: "3"},
 		{ID: "view.audit", Label: "Navigate to audit log", Hint: "4"},
+		{ID: "view.mailbox", Label: "Navigate to mailbox", Hint: "5"},
 		{
 			ID:             "agent.spawn",
 			Label:          "Spawn agent",
@@ -2898,6 +3162,10 @@ func (m *model) applyPaletteAction(action paletteAction) tea.Cmd {
 		m.view = viewAudit
 		m.selectedView = viewAudit
 		m.ensureAuditSelection(m.filteredAuditItems())
+	case "view.mailbox":
+		m.view = viewMailbox
+		m.selectedView = viewMailbox
+		m.ensureMailSelection(m.filteredMailThreads())
 	case "agent.spawn":
 		m.setStatus("Spawn agent not wired yet.", statusWarn)
 	case "agent.pause":
@@ -2973,6 +3241,8 @@ func isRedundantViewAction(actionID string, view viewID) bool {
 		return actionID == "view.agent"
 	case viewAudit:
 		return actionID == "view.audit"
+	case viewMailbox:
+		return actionID == "view.mailbox"
 	default:
 		return false
 	}
@@ -3386,6 +3656,8 @@ func (m *model) openSearch(target viewID) {
 		m.searchQuery = m.agentFilter
 	case viewAudit:
 		m.searchQuery = m.auditFilter
+	case viewMailbox:
+		m.searchQuery = m.mailFilter
 	}
 	m.searchPrevQuery = m.searchQuery
 	m.applySearchQuery()
@@ -3444,6 +3716,9 @@ func (m *model) applySearchQuery() {
 	case viewAudit:
 		m.auditFilter = m.searchQuery
 		m.ensureAuditSelection(m.filteredAuditItems())
+	case viewMailbox:
+		m.mailFilter = m.searchQuery
+		m.ensureMailSelection(m.filteredMailThreads())
 	}
 }
 
@@ -3459,6 +3734,9 @@ func (m *model) clearSearchFilter(target viewID) {
 	case viewAudit:
 		m.auditFilter = ""
 		m.ensureAuditSelection(m.filteredAuditItems())
+	case viewMailbox:
+		m.mailFilter = ""
+		m.ensureMailSelection(m.filteredMailThreads())
 	}
 }
 
@@ -4123,6 +4401,8 @@ func (m model) searchLine(target viewID) string {
 		query = m.agentFilter
 	case viewAudit:
 		query = m.auditFilter
+	case viewMailbox:
+		query = m.mailFilter
 	}
 	activeSearch := m.searchOpen && m.searchTarget == target
 	label := "Filter"
@@ -4177,6 +4457,27 @@ func (m model) auditSearchStatusLines() []string {
 	if matches == 0 {
 		lines = append(lines,
 			m.styles.Warning.Render("No audit events match this filter."),
+			m.styles.Muted.Render("Press / to edit or clear the filter."),
+		)
+	}
+	return lines
+}
+
+func (m model) mailSearchStatusLines() []string {
+	query := strings.TrimSpace(m.mailFilter)
+	if query == "" {
+		return nil
+	}
+	allThreads := m.mailThreads
+	filtered := m.filteredMailThreads()
+	total := len(allThreads)
+	matches := len(filtered)
+	lines := []string{
+		m.styles.Muted.Render(fmt.Sprintf("Matches: %d/%d", matches, total)),
+	}
+	if matches == 0 {
+		lines = append(lines,
+			m.styles.Warning.Render("No mailbox threads match this filter."),
 			m.styles.Muted.Render("Press / to edit or clear the filter."),
 		)
 	}
@@ -4285,6 +4586,19 @@ func filterAuditItems(items []auditItem, query string) []auditItem {
 	return filtered
 }
 
+func filterMailThreads(threads []mailThread, query string) []mailThread {
+	if strings.TrimSpace(query) == "" {
+		return threads
+	}
+	filtered := make([]mailThread, 0, len(threads))
+	for _, thread := range threads {
+		if matchesSearch(query, mailThreadHaystack(thread)) {
+			filtered = append(filtered, thread)
+		}
+	}
+	return filtered
+}
+
 func agentCardHaystack(card components.AgentCard) string {
 	fields := []string{
 		card.Name,
@@ -4307,6 +4621,19 @@ func auditItemHaystack(item auditItem) string {
 		item.EntityID,
 		item.Summary,
 		item.Detail,
+	}
+	return strings.ToLower(strings.Join(fields, " "))
+}
+
+func mailThreadHaystack(thread mailThread) string {
+	fields := []string{thread.ID, thread.Subject}
+	for _, msg := range thread.Messages {
+		fields = append(fields,
+			msg.ID,
+			msg.From,
+			msg.Body,
+			msg.CreatedAt.Format("2006-01-02 15:04:05"),
+		)
 	}
 	return strings.ToLower(strings.Join(fields, " "))
 }

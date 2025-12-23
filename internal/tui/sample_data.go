@@ -236,3 +236,69 @@ func sampleAuditItems() []auditItem {
 		},
 	}
 }
+
+func sampleMailboxThreads() []mailThread {
+	now := time.Now()
+	return []mailThread{
+		{
+			ID:      "thread-201",
+			Subject: "Approval needed: auth middleware update",
+			Messages: []mailMessage{
+				{
+					ID:        "msg-701",
+					From:      "Agent B7",
+					Body:      "Requesting approval for auth middleware changes in ws-2.",
+					CreatedAt: now.Add(-35 * time.Minute),
+					Read:      true,
+				},
+				{
+					ID:        "msg-702",
+					From:      "Operator",
+					Body:      "Please include the diff summary before approval.",
+					CreatedAt: now.Add(-30 * time.Minute),
+					Read:      true,
+				},
+				{
+					ID:        "msg-703",
+					From:      "Agent B7",
+					Body:      "Diff summary: auth.go token refresh guard added; tests pending.",
+					CreatedAt: now.Add(-25 * time.Minute),
+					Read:      false,
+				},
+			},
+		},
+		{
+			ID:      "thread-202",
+			Subject: "Rate limit cooldown applied",
+			Messages: []mailMessage{
+				{
+					ID:        "msg-710",
+					From:      "Scheduler",
+					Body:      "Cooldown started for account acct-primary (5 minutes).",
+					CreatedAt: now.Add(-18 * time.Minute),
+					Read:      false,
+				},
+			},
+		},
+		{
+			ID:      "thread-203",
+			Subject: "Workspace ws-3 error triage",
+			Messages: []mailMessage{
+				{
+					ID:        "msg-720",
+					From:      "Agent C3",
+					Body:      "Investigating error from tmux capture; may be stale session.",
+					CreatedAt: now.Add(-50 * time.Minute),
+					Read:      true,
+				},
+				{
+					ID:        "msg-721",
+					From:      "Operator",
+					Body:      "Restart session if no heartbeat in 10 minutes.",
+					CreatedAt: now.Add(-45 * time.Minute),
+					Read:      true,
+				},
+			},
+		},
+	}
+}
