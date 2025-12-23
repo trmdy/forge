@@ -77,28 +77,33 @@ type DetectionResult struct {
 
 	// DiffMetadata contains parsed diff metadata when available.
 	DiffMetadata *models.DiffMetadata
+
+	// ProcessStats contains process resource metrics when available.
+	ProcessStats *models.ProcessStats
 }
 
 // Engine manages agent state detection and notifications.
 type Engine struct {
-	repo        *db.AgentRepository
-	eventRepo   *db.EventRepository
-	tmuxClient  *tmux.Client
-	registry    *adapters.Registry
-	subscribers map[string]Subscriber
-	mu          sync.RWMutex
-	logger      zerolog.Logger
+	repo           *db.AgentRepository
+	eventRepo      *db.EventRepository
+	tmuxClient     *tmux.Client
+	registry       *adapters.Registry
+	subscribers    map[string]Subscriber
+	statsCollector *ProcessStatsCollector
+	mu             sync.RWMutex
+	logger         zerolog.Logger
 }
 
 // NewEngine creates a new StateEngine.
 func NewEngine(repo *db.AgentRepository, eventRepo *db.EventRepository, tmuxClient *tmux.Client, registry *adapters.Registry) *Engine {
 	return &Engine{
-		repo:        repo,
-		eventRepo:   eventRepo,
-		tmuxClient:  tmuxClient,
-		registry:    registry,
-		subscribers: make(map[string]Subscriber),
-		logger:      logging.Component("state-engine"),
+		repo:           repo,
+		eventRepo:      eventRepo,
+		tmuxClient:     tmuxClient,
+		registry:       registry,
+		subscribers:    make(map[string]Subscriber),
+		statsCollector: NewProcessStatsCollector(),
+		logger:         logging.Component("state-engine"),
 	}
 }
 
@@ -128,6 +133,11 @@ func (e *Engine) GetAgent(ctx context.Context, agentID string) (*models.Agent, e
 
 // UpdateState updates an agent's state and notifies subscribers.
 func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.AgentState, info models.StateInfo, usage *models.UsageMetrics, diff *models.DiffMetadata) error {
+	return e.UpdateStateWithStats(ctx, agentID, state, info, usage, diff, nil)
+}
+
+// UpdateStateWithStats updates an agent's state with optional process stats.
+func (e *Engine) UpdateStateWithStats(ctx context.Context, agentID string, state models.AgentState, info models.StateInfo, usage *models.UsageMetrics, diff *models.DiffMetadata, stats *models.ProcessStats) error {
 	agent, err := e.repo.Get(ctx, agentID)
 	if err != nil {
 		if errors.Is(err, db.ErrAgentNotFound) {
@@ -148,6 +158,9 @@ func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.A
 	}
 	if diff != nil {
 		agent.Metadata.DiffMetadata = diff
+	}
+	if stats != nil {
+		agent.Metadata.ProcessStats = stats
 	}
 
 	if previousState != state && e.eventRepo != nil {
@@ -235,6 +248,12 @@ func (e *Engine) DetectState(ctx context.Context, agentID string) (*DetectionRes
 		}
 	}
 
+	// Collect process stats if PID is known
+	var processStats *models.ProcessStats
+	if agent.Metadata.PID > 0 && e.statsCollector != nil {
+		processStats = e.statsCollector.Collect(agent.Metadata.PID)
+	}
+
 	result := &DetectionResult{
 		State:        state,
 		Confidence:   reason.Confidence,
@@ -243,6 +262,7 @@ func (e *Engine) DetectState(ctx context.Context, agentID string) (*DetectionRes
 		ScreenHash:   screenHash,
 		UsageMetrics: usage,
 		DiffMetadata: diff,
+		ProcessStats: processStats,
 	}
 
 	// Apply rule-based inference on top of adapter result when needed.
@@ -265,7 +285,7 @@ func (e *Engine) DetectAndUpdate(ctx context.Context, agentID string) (*Detectio
 		DetectedAt: time.Now().UTC(),
 	}
 
-	if err := e.UpdateState(ctx, agentID, result.State, info, result.UsageMetrics, result.DiffMetadata); err != nil {
+	if err := e.UpdateStateWithStats(ctx, agentID, result.State, info, result.UsageMetrics, result.DiffMetadata, result.ProcessStats); err != nil {
 		return nil, err
 	}
 

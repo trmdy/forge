@@ -134,6 +134,9 @@ type AgentMetadata struct {
 
 	// DiffMetadata captures best-effort diff data from adapters.
 	DiffMetadata *DiffMetadata `json:"diff_metadata,omitempty"`
+
+	// ProcessStats captures process-level resource metrics.
+	ProcessStats *ProcessStats `json:"process_stats,omitempty"`
 }
 
 // UsageMetrics contains usage metrics captured from an agent runtime.
@@ -202,6 +205,27 @@ type DiffMetadata struct {
 	Source string `json:"source,omitempty"`
 
 	// UpdatedAt is when the metadata was captured.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ProcessStats contains process-level resource metrics for an agent.
+type ProcessStats struct {
+	// CPUPercent is the CPU usage percentage (0-100 per core).
+	CPUPercent float64 `json:"cpu_percent"`
+
+	// MemoryBytes is the resident set size in bytes.
+	MemoryBytes int64 `json:"memory_bytes"`
+
+	// MemoryPercent is the memory usage as percentage of total system memory.
+	MemoryPercent float64 `json:"memory_percent"`
+
+	// IOReadBytes is total bytes read by the process.
+	IOReadBytes int64 `json:"io_read_bytes,omitempty"`
+
+	// IOWriteBytes is total bytes written by the process.
+	IOWriteBytes int64 `json:"io_write_bytes,omitempty"`
+
+	// UpdatedAt is when the stats were collected.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
