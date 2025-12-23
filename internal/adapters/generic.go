@@ -222,19 +222,8 @@ func ClaudeCodeAdapter() AgentAdapter {
 }
 
 // CodexAdapter creates an adapter for OpenAI Codex CLI.
-func CodexAdapter() *GenericAdapter {
-	return NewGenericAdapter(
-		string(models.AgentTypeCodex),
-		"codex",
-		WithIdleIndicators(
-			">",
-			"codex>",
-		),
-		WithBusyIndicators(
-			"processing",
-			"generating",
-		),
-	)
+func CodexAdapter() AgentAdapter {
+	return NewCodexAdapter()
 }
 
 // GeminiAdapter creates an adapter for Google Gemini CLI.
