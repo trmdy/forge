@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	swarmdv1 "github.com/opencode-ai/swarm/gen/swarmd/v1"
+	"github.com/opencode-ai/swarm/internal/tmux"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func TestServerPing(t *testing.T) {
@@ -508,6 +511,111 @@ func (s *eventStreamRecorder) SetTrailer(metadata.MD)       {}
 func (s *eventStreamRecorder) Context() context.Context     { return s.ctx }
 func (s *eventStreamRecorder) SendMsg(interface{}) error    { return nil }
 func (s *eventStreamRecorder) RecvMsg(interface{}) error    { return nil }
+
+// =============================================================================
+// Pane Update Tests
+// =============================================================================
+
+type staticExecutor struct {
+	stdout []byte
+	err    error
+}
+
+func (e *staticExecutor) Exec(ctx context.Context, cmd string) ([]byte, []byte, error) {
+	return e.stdout, nil, e.err
+}
+
+type paneUpdateRecorder struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	responses []*swarmdv1.StreamPaneUpdatesResponse
+}
+
+func newPaneUpdateRecorder(timeout time.Duration) *paneUpdateRecorder {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return &paneUpdateRecorder{ctx: ctx, cancel: cancel}
+}
+
+func (s *paneUpdateRecorder) Send(resp *swarmdv1.StreamPaneUpdatesResponse) error {
+	s.responses = append(s.responses, resp)
+	return nil
+}
+
+func (s *paneUpdateRecorder) SetHeader(metadata.MD) error  { return nil }
+func (s *paneUpdateRecorder) SendHeader(metadata.MD) error { return nil }
+func (s *paneUpdateRecorder) SetTrailer(metadata.MD)       {}
+func (s *paneUpdateRecorder) Context() context.Context     { return s.ctx }
+func (s *paneUpdateRecorder) SendMsg(interface{}) error    { return nil }
+func (s *paneUpdateRecorder) RecvMsg(interface{}) error    { return nil }
+
+func TestStreamPaneUpdatesSkipsUnchangedContent(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	exec := &staticExecutor{stdout: []byte("steady output")}
+	server.tmux = tmux.NewClient(exec)
+
+	server.mu.Lock()
+	server.agents["agent-1"] = &agentInfo{
+		id:     "agent-1",
+		paneID: "%1",
+	}
+	server.mu.Unlock()
+
+	stream := newPaneUpdateRecorder(60 * time.Millisecond)
+	req := &swarmdv1.StreamPaneUpdatesRequest{
+		AgentId:     "agent-1",
+		MinInterval: durationpb.New(5 * time.Millisecond),
+	}
+
+	err := server.StreamPaneUpdates(req, stream)
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("StreamPaneUpdates() error = %v", err)
+	}
+
+	if len(stream.responses) != 1 {
+		t.Fatalf("Expected 1 pane update, got %d", len(stream.responses))
+	}
+
+	resp := stream.responses[0]
+	if !resp.Changed {
+		t.Error("Expected first pane update to be marked changed")
+	}
+	wantHash := tmux.HashSnapshot("steady output")
+	if resp.ContentHash != wantHash {
+		t.Errorf("ContentHash = %q, want %q", resp.ContentHash, wantHash)
+	}
+}
+
+func TestStreamPaneUpdatesRespectsLastKnownHash(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	exec := &staticExecutor{stdout: []byte("no change")}
+	server.tmux = tmux.NewClient(exec)
+
+	server.mu.Lock()
+	server.agents["agent-1"] = &agentInfo{
+		id:     "agent-1",
+		paneID: "%1",
+	}
+	server.mu.Unlock()
+
+	lastHash := tmux.HashSnapshot("no change")
+	stream := newPaneUpdateRecorder(60 * time.Millisecond)
+	req := &swarmdv1.StreamPaneUpdatesRequest{
+		AgentId:       "agent-1",
+		LastKnownHash: lastHash,
+		MinInterval:   durationpb.New(5 * time.Millisecond),
+	}
+
+	err := server.StreamPaneUpdates(req, stream)
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("StreamPaneUpdates() error = %v", err)
+	}
+
+	if len(stream.responses) != 0 {
+		t.Fatalf("Expected 0 pane updates, got %d", len(stream.responses))
+	}
+}
 
 func TestPublishEvent(t *testing.T) {
 	server := NewServer(zerolog.Nop())
