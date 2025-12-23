@@ -62,6 +62,98 @@ type UsageStats struct {
 	RateLimitCount int64 `json:"rate_limit_count"`
 }
 
+// UsageLimits defines thresholds for usage warnings.
+type UsageLimits struct {
+	// MaxTokensPerDay is the daily token limit (0 = no limit).
+	MaxTokensPerDay int64 `json:"max_tokens_per_day,omitempty"`
+
+	// MaxCostPerDayCents is the daily cost limit in cents (0 = no limit).
+	MaxCostPerDayCents int64 `json:"max_cost_per_day_cents,omitempty"`
+
+	// MaxRequestsPerHour is the hourly request limit (0 = no limit).
+	MaxRequestsPerHour int64 `json:"max_requests_per_hour,omitempty"`
+
+	// WarningThresholdPercent is when to start warning (default: 80).
+	WarningThresholdPercent int `json:"warning_threshold_percent,omitempty"`
+}
+
+// DefaultWarningThreshold is the default percentage at which to warn.
+const DefaultWarningThreshold = 80
+
+// UsageLimitStatus represents the current status relative to limits.
+type UsageLimitStatus struct {
+	// IsApproachingLimit indicates a limit is being approached.
+	IsApproachingLimit bool `json:"is_approaching_limit"`
+
+	// IsOverLimit indicates a limit has been exceeded.
+	IsOverLimit bool `json:"is_over_limit"`
+
+	// Warnings contains specific warning messages.
+	Warnings []string `json:"warnings,omitempty"`
+
+	// TokensUsedPercent is percentage of daily token limit used.
+	TokensUsedPercent float64 `json:"tokens_used_percent,omitempty"`
+
+	// CostUsedPercent is percentage of daily cost limit used.
+	CostUsedPercent float64 `json:"cost_used_percent,omitempty"`
+
+	// RequestsUsedPercent is percentage of hourly request limit used.
+	RequestsUsedPercent float64 `json:"requests_used_percent,omitempty"`
+}
+
+// CheckLimits evaluates current usage against limits.
+func CheckLimits(usage *UsageSummary, limits *UsageLimits) *UsageLimitStatus {
+	status := &UsageLimitStatus{}
+
+	if usage == nil || limits == nil {
+		return status
+	}
+
+	threshold := limits.WarningThresholdPercent
+	if threshold <= 0 {
+		threshold = DefaultWarningThreshold
+	}
+	thresholdFloat := float64(threshold) / 100.0
+
+	// Check token limit
+	if limits.MaxTokensPerDay > 0 {
+		status.TokensUsedPercent = float64(usage.TotalTokens) / float64(limits.MaxTokensPerDay) * 100
+		if status.TokensUsedPercent >= 100 {
+			status.IsOverLimit = true
+			status.Warnings = append(status.Warnings, "Daily token limit exceeded")
+		} else if status.TokensUsedPercent >= thresholdFloat*100 {
+			status.IsApproachingLimit = true
+			status.Warnings = append(status.Warnings, "Approaching daily token limit")
+		}
+	}
+
+	// Check cost limit
+	if limits.MaxCostPerDayCents > 0 {
+		status.CostUsedPercent = float64(usage.TotalCostCents) / float64(limits.MaxCostPerDayCents) * 100
+		if status.CostUsedPercent >= 100 {
+			status.IsOverLimit = true
+			status.Warnings = append(status.Warnings, "Daily cost limit exceeded")
+		} else if status.CostUsedPercent >= thresholdFloat*100 {
+			status.IsApproachingLimit = true
+			status.Warnings = append(status.Warnings, "Approaching daily cost limit")
+		}
+	}
+
+	// Check request limit
+	if limits.MaxRequestsPerHour > 0 {
+		status.RequestsUsedPercent = float64(usage.RequestCount) / float64(limits.MaxRequestsPerHour) * 100
+		if status.RequestsUsedPercent >= 100 {
+			status.IsOverLimit = true
+			status.Warnings = append(status.Warnings, "Hourly request limit exceeded")
+		} else if status.RequestsUsedPercent >= thresholdFloat*100 {
+			status.IsApproachingLimit = true
+			status.Warnings = append(status.Warnings, "Approaching hourly request limit")
+		}
+	}
+
+	return status
+}
+
 // Validate checks if the account configuration is valid.
 func (a *Account) Validate() error {
 	validation := &ValidationErrors{}

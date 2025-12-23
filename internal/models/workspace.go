@@ -103,6 +103,7 @@ const (
 	AlertTypeCooldown       AlertType = "cooldown"
 	AlertTypeError          AlertType = "error"
 	AlertTypeRateLimit      AlertType = "rate_limit"
+	AlertTypeUsageLimit     AlertType = "usage_limit"
 )
 
 // Alert represents a notification requiring attention.
