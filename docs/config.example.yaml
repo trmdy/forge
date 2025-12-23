@@ -71,6 +71,21 @@ workspace_defaults:
   # Automatically import existing tmux sessions
   auto_import_existing: false
 
+# Workspace-specific overrides
+workspace_overrides:
+  # Example: permissive approvals in a dev workspace
+  - name: my-project
+    approval_policy: permissive
+
+  # Example: custom approvals for sensitive repos
+  - repo_path: /repos/secure-*
+    approval_policy: custom
+    approval_rules:
+      - request_type: file_changes
+        action: approve
+      - request_type: shell_command
+        action: prompt
+
 # Default settings for agents
 agent_defaults:
   # Default agent CLI type: opencode, claude-code, codex, gemini, generic
@@ -85,8 +100,13 @@ agent_defaults:
   # Maximum lines to keep in transcript buffer
   transcript_buffer_size: 10000
   
-  # Approval policy: strict (always ask), permissive (auto-approve safe actions)
+  # Approval policy: strict (always ask), permissive (auto-approve), custom (use rules)
   approval_policy: strict
+
+  # Optional rules for custom approval policy
+  # approval_rules:
+  #   - request_type: "*"
+  #     action: prompt
 
 # Scheduler settings
 scheduler:

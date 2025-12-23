@@ -66,11 +66,23 @@ Defaults applied when creating new nodes. Per-node overrides are not implemented
 
 ### workspace_defaults
 
-Defaults applied when creating new workspaces. Per-workspace overrides are not implemented yet.
+Defaults applied when creating new workspaces.
 
 - `workspace_defaults.tmux_prefix` (string): Prefix for generated tmux sessions. Default: `swarm`.
 - `workspace_defaults.default_agent_type` (string): `opencode`, `claude-code`, `codex`, `gemini`, `generic`. Default: `opencode`.
 - `workspace_defaults.auto_import_existing` (bool): Auto import existing tmux sessions. Default: `false`.
+
+### workspace_overrides
+
+Per-workspace overrides. Matches by `workspace_id`, `name`, or `repo_path` (supports glob patterns).
+
+- `workspace_overrides[].workspace_id` (string): Match a workspace ID.
+- `workspace_overrides[].name` (string): Match a workspace name.
+- `workspace_overrides[].repo_path` (string): Match a repo path (glob).
+- `workspace_overrides[].approval_policy` (string): `strict`, `permissive`, or `custom`.
+- `workspace_overrides[].approval_rules` (list): Rules applied when policy is `custom` (or when rules are set).
+  - `approval_rules[].request_type` (string): Request type to match (use `*` to match all).
+  - `approval_rules[].action` (string): `approve`, `deny`, or `prompt`.
 
 ### agent_defaults
 
@@ -78,7 +90,10 @@ Defaults applied when creating new workspaces. Per-workspace overrides are not i
 - `agent_defaults.state_polling_interval` (duration): State polling interval. Default: `2s`.
 - `agent_defaults.idle_timeout` (duration): Idle timeout before marking idle. Default: `10s`.
 - `agent_defaults.transcript_buffer_size` (int): Max transcript lines. Default: `10000`.
-- `agent_defaults.approval_policy` (string): `strict` or `permissive`. Default: `strict`.
+- `agent_defaults.approval_policy` (string): `strict`, `permissive`, or `custom`. Default: `strict`.
+- `agent_defaults.approval_rules` (list): Rules applied when policy is `custom` (or when rules are set).
+  - `approval_rules[].request_type` (string): Request type to match (use `*` to match all).
+  - `approval_rules[].action` (string): `approve`, `deny`, or `prompt`.
 
 ### scheduler
 
