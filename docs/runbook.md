@@ -98,6 +98,21 @@ but not yet wired up. Planned steps are labeled.
 - `swarm node bootstrap` to provision dependencies.
 - `swarm node doctor` for diagnostics.
 
+## swarmd systemd service (optional)
+
+If you install `swarmd` on a node, you can run it as a systemd service.
+Use the template in `scripts/swarmd.service`, copy it to `/etc/systemd/system/`,
+then enable it:
+
+```bash
+sudo cp scripts/swarmd.service /etc/systemd/system/swarmd.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now swarmd
+```
+
+Note: `swarmd` is still a stub in this repo; enable this only when you are
+ready to run the daemon on the node.
+
 ## Secure remote access (SSH port forwarding)
 
 When you need to reach a service running on a remote node (for example an agent
