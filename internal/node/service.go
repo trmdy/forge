@@ -422,6 +422,20 @@ func (s *Service) gatherNodeMetadata(ctx context.Context, executor ssh.Executor)
 	}
 	metadata.AvailableAdapters = adapters
 
+	// Check for swarmd daemon
+	if stdout, _, err := executor.Exec(ctx, "swarmd --version 2>/dev/null"); err == nil && len(stdout) > 0 {
+		metadata.SwarmdVersion = strings.TrimSpace(string(stdout))
+	}
+
+	// Check if swarmd is running
+	if _, _, err := executor.Exec(ctx, "pgrep -x swarmd >/dev/null 2>&1"); err == nil {
+		metadata.SwarmdStatus = "running"
+	} else if metadata.SwarmdVersion != "" {
+		metadata.SwarmdStatus = "installed"
+	} else {
+		metadata.SwarmdStatus = "not_installed"
+	}
+
 	return metadata
 }
 

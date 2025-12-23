@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 	"sync"
+
+	"github.com/opencode-ai/swarm/internal/ssh"
 )
 
 // SSHExecCall records a single call to Exec or ExecInteractive.
@@ -111,8 +113,8 @@ func (m *SSHExecutor) ExecInteractive(ctx context.Context, cmd string, stdin io.
 	return nil
 }
 
-// StartSession returns a mock session.
-func (m *SSHExecutor) StartSession() (Session, error) {
+// StartSession returns a mock session that implements ssh.Session.
+func (m *SSHExecutor) StartSession() (ssh.Session, error) {
 	return &SSHSession{executor: m}, nil
 }
 
