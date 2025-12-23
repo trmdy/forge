@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/opencode-ai/swarm/internal/agentmail"
 	"github.com/opencode-ai/swarm/internal/beads"
 	"github.com/opencode-ai/swarm/internal/db"
 	"github.com/opencode-ai/swarm/internal/events"
@@ -382,6 +383,9 @@ type WorkspaceStatusResult struct {
 	// BeadsDetected indicates if the workspace contains a .beads directory.
 	BeadsDetected bool
 
+	// AgentMailDetected indicates if the workspace contains Agent Mail MCP config.
+	AgentMailDetected bool
+
 	// ActiveAgents is the number of active agents.
 	ActiveAgents int
 
@@ -447,6 +451,15 @@ func (s *Service) GetWorkspaceStatus(ctx context.Context, id string) (*Workspace
 			s.logger.Warn().Err(err).Msg("failed to detect beads directory")
 		} else {
 			result.BeadsDetected = detected
+		}
+	}
+
+	if workspace.RepoPath != "" {
+		detected, err := agentmail.HasAgentMailConfig(workspace.RepoPath)
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("failed to detect Agent Mail config")
+		} else {
+			result.AgentMailDetected = detected
 		}
 	}
 
