@@ -10,7 +10,7 @@ type openCodeAdapter struct {
 func NewOpenCodeAdapter() *openCodeAdapter {
 	base := NewGenericAdapter(
 		string(models.AgentTypeOpenCode),
-		"opencode",
+		"opencode --hostname 127.0.0.1",
 		WithIdleIndicators(
 			"opencode>",
 			"waiting for input",
