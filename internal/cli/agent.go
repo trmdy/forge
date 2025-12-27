@@ -647,22 +647,26 @@ var agentResumeCmd = &cobra.Command{
 }
 
 var agentSendCmd = &cobra.Command{
-	Use:   "send <agent-id> [message]",
-	Short: "Send a message to an agent",
-	Long: `Send a text message to an agent. By default, requires the agent to be idle.
+	Use:        "send <agent-id> [message]",
+	Short:      "Send a message to an agent (DEPRECATED: use 'swarm send' instead)",
+	Deprecated: "Use 'swarm send' for queue-based dispatch. This command uses direct injection.",
+	Long: `DEPRECATED: Use 'swarm send' for safe queue-based dispatch.
+
+This command directly injects text via tmux send-keys, bypassing the queue.
+For reliable delivery, use 'swarm send' which queues messages for dispatch
+when the agent is ready.
+
+Send a text message to an agent. By default, requires the agent to be idle.
 
 Provide the message inline, or use --file, --stdin, or --editor to send multi-line input.`,
-	Example: `  # Send a one-line message
+	Example: `  # RECOMMENDED: Use 'swarm send' instead
+  swarm send abc123 "Fix the lint errors"
+
+  # Legacy direct injection (bypasses queue)
   swarm agent send abc123 "Fix the lint errors"
 
   # Send a multi-line message from a file
-  swarm agent send abc123 --file prompt.txt
-
-  # Send from stdin
-  cat prompt.txt | swarm agent send abc123 --stdin
-
-  # Compose in $EDITOR
-  swarm agent send abc123 --editor`,
+  swarm agent send abc123 --file prompt.txt`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
