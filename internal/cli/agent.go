@@ -1039,18 +1039,22 @@ func formatApprovalDetails(details json.RawMessage) string {
 }
 
 func resolveSendMessage(args []string) (string, error) {
+	return resolveMessage(args, agentSendFile, agentSendStdin, agentSendEditor)
+}
+
+func resolveMessage(args []string, file string, stdin bool, editor bool) (string, error) {
 	hasInline := len(args) > 1
 	sourceCount := 0
 	if hasInline {
 		sourceCount++
 	}
-	if agentSendFile != "" {
+	if file != "" {
 		sourceCount++
 	}
-	if agentSendStdin {
+	if stdin {
 		sourceCount++
 	}
-	if agentSendEditor {
+	if editor {
 		sourceCount++
 	}
 
@@ -1065,11 +1069,11 @@ func resolveSendMessage(args []string) (string, error) {
 	var err error
 
 	switch {
-	case agentSendFile != "":
-		message, err = readMessageFromFile(agentSendFile)
-	case agentSendStdin:
+	case file != "":
+		message, err = readMessageFromFile(file)
+	case stdin:
 		message, err = readMessageFromStdin()
-	case agentSendEditor:
+	case editor:
 		message, err = readMessageFromEditor()
 	default:
 		message = strings.Join(args[1:], " ")

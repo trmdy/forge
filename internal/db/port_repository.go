@@ -32,6 +32,7 @@ type PortAllocation struct {
 	AgentID     *string
 	Reason      string
 	AllocatedAt time.Time
+	ReleasedAt  *time.Time
 }
 
 // PortRepository handles port allocation persistence.
@@ -208,9 +209,9 @@ func (r *PortRepository) GetByNodeAndPort(ctx context.Context, nodeID string, po
 // ListActiveByNode retrieves all active port allocations for a node.
 func (r *PortRepository) ListActiveByNode(ctx context.Context, nodeID string) ([]*PortAllocation, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, port, node_id, agent_id, reason, allocated_at, released_at
+		SELECT id, port, node_id, agent_id, reason, allocated_at
 		FROM port_allocations
-		WHERE node_id = ? AND released_at IS NULL
+		WHERE node_id = ?
 		ORDER BY port
 	`, nodeID)
 	if err != nil {
@@ -226,7 +227,7 @@ func (r *PortRepository) CountActiveByNode(ctx context.Context, nodeID string) (
 	var count int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM port_allocations
-		WHERE node_id = ? AND released_at IS NULL
+		WHERE node_id = ?
 	`, nodeID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count port allocations: %w", err)
@@ -239,7 +240,7 @@ func (r *PortRepository) IsPortAvailable(ctx context.Context, nodeID string, por
 	var count int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM port_allocations
-		WHERE node_id = ? AND port = ? AND released_at IS NULL
+		WHERE node_id = ? AND port = ?
 	`, nodeID, port).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("failed to check port availability: %w", err)

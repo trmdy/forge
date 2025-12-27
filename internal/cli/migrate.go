@@ -51,7 +51,7 @@ var migrateUpCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		database, err := openDatabase()
+		database, err := openDatabaseNoMigrate()
 		if err != nil {
 			return err
 		}
@@ -88,7 +88,7 @@ var migrateDownCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		database, err := openDatabase()
+		database, err := openDatabaseNoMigrate()
 		if err != nil {
 			return err
 		}
@@ -116,7 +116,7 @@ var migrateStatusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		database, err := openDatabase()
+		database, err := openDatabaseNoMigrate()
 		if err != nil {
 			return err
 		}
@@ -158,7 +158,7 @@ var migrateVersionCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		database, err := openDatabase()
+		database, err := openDatabaseNoMigrate()
 		if err != nil {
 			return err
 		}
@@ -181,6 +181,14 @@ var migrateVersionCmd = &cobra.Command{
 
 // openDatabase opens the database using the current configuration.
 func openDatabase() (*db.DB, error) {
+	return openDatabaseWithMigration(true)
+}
+
+func openDatabaseNoMigrate() (*db.DB, error) {
+	return openDatabaseWithMigration(false)
+}
+
+func openDatabaseWithMigration(autoMigrate bool) (*db.DB, error) {
 	if appConfig == nil {
 		return nil, fmt.Errorf("configuration not loaded")
 	}
@@ -191,5 +199,53 @@ func openDatabase() (*db.DB, error) {
 		BusyTimeoutMs: 5000,
 	}
 
-	return db.Open(cfg)
+	database, err := db.Open(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if autoMigrate {
+		if err := autoMigrateDatabase(database); err != nil {
+			_ = database.Close()
+			return nil, err
+		}
+	}
+
+	return database, nil
+}
+
+func autoMigrateDatabase(database *db.DB) error {
+	if database == nil {
+		return fmt.Errorf("database is required")
+	}
+
+	ctx := context.Background()
+	beforeVersion := 0
+
+	version, err := database.SchemaVersion(ctx)
+	if err != nil {
+		if !isMissingSchemaTable(err) {
+			return fmt.Errorf("failed to read schema version: %w", err)
+		}
+	} else {
+		beforeVersion = version
+	}
+
+	applied, err := database.MigrateUp(ctx)
+	if err != nil {
+		return fmt.Errorf("auto-migrate failed: %w", err)
+	}
+
+	if applied > 0 {
+		afterVersion := beforeVersion
+		if version, err := database.SchemaVersion(ctx); err == nil {
+			afterVersion = version
+		}
+		logger.Info().
+			Int("from_version", beforeVersion).
+			Int("to_version", afterVersion).
+			Msg("database migrated")
+	}
+
+	return nil
 }
