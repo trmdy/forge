@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/opencode-ai/swarm/gen/swarmd/v1"
@@ -41,6 +42,59 @@ func DefaultResourceLimits() ResourceLimits {
 		GracePeriodSeconds:   30,
 		WarnThresholdPercent: 80,
 	}
+}
+
+// DiskMonitorConfig defines disk usage monitoring thresholds.
+type DiskMonitorConfig struct {
+	// Path is the filesystem path to monitor.
+	Path string
+
+	// WarnPercent triggers warning at or above this percent (0 = disabled).
+	WarnPercent float64
+
+	// CriticalPercent triggers critical state at or above this percent (0 = disabled).
+	CriticalPercent float64
+
+	// ResumePercent resumes paused agents when usage drops below this percent (0 = defaults to WarnPercent).
+	ResumePercent float64
+
+	// PauseAgents pauses agent processes when disk is critically full.
+	PauseAgents bool
+}
+
+// DefaultDiskMonitorConfig returns sensible defaults for disk monitoring.
+func DefaultDiskMonitorConfig() DiskMonitorConfig {
+	return DiskMonitorConfig{
+		Path:            "/",
+		WarnPercent:     85,
+		CriticalPercent: 95,
+		ResumePercent:   90,
+		PauseAgents:     false,
+	}
+}
+
+// DiskUsage represents filesystem usage.
+type DiskUsage struct {
+	Path        string
+	TotalBytes  uint64
+	FreeBytes   uint64
+	UsedBytes   uint64
+	UsedPercent float64
+}
+
+type diskUsageLevel int
+
+const (
+	diskUsageOK diskUsageLevel = iota
+	diskUsageWarn
+	diskUsageCritical
+)
+
+type diskMonitorState struct {
+	level         diskUsageLevel
+	lastUsage     DiskUsage
+	lastCheckedAt time.Time
+	pausedAgents  map[string]int
 }
 
 // ResourceUsage represents the current resource usage of an agent.
@@ -85,6 +139,10 @@ type ResourceMonitor struct {
 	agents map[string]*agentResourceState // keyed by agent ID
 	limits ResourceLimits                 // default limits
 
+	diskConfig    DiskMonitorConfig
+	diskState     diskMonitorState
+	diskUsageFunc func(string) (DiskUsage, error)
+
 	// Callbacks for violations
 	onViolation func(violation ResourceViolation)
 	onKill      func(agentID string, reason string)
@@ -125,6 +183,22 @@ func WithKillCallback(cb func(agentID, reason string)) ResourceMonitorOption {
 	}
 }
 
+// WithDiskMonitorConfig sets disk monitoring configuration.
+func WithDiskMonitorConfig(cfg DiskMonitorConfig) ResourceMonitorOption {
+	return func(rm *ResourceMonitor) {
+		rm.diskConfig = cfg
+	}
+}
+
+// WithDiskUsageFunc overrides disk usage measurement (useful for tests).
+func WithDiskUsageFunc(fn func(string) (DiskUsage, error)) ResourceMonitorOption {
+	return func(rm *ResourceMonitor) {
+		if fn != nil {
+			rm.diskUsageFunc = fn
+		}
+	}
+}
+
 // NewResourceMonitor creates a new resource monitor.
 func NewResourceMonitor(logger zerolog.Logger, server *Server, opts ...ResourceMonitorOption) *ResourceMonitor {
 	rm := &ResourceMonitor{
@@ -133,13 +207,44 @@ func NewResourceMonitor(logger zerolog.Logger, server *Server, opts ...ResourceM
 		interval: 5 * time.Second, // Default: check every 5 seconds
 		agents:   make(map[string]*agentResourceState),
 		limits:   DefaultResourceLimits(),
+		diskConfig: func() DiskMonitorConfig {
+			cfg := DefaultDiskMonitorConfig()
+			return cfg
+		}(),
+		diskUsageFunc: getDiskUsage,
+		diskState: diskMonitorState{
+			pausedAgents: make(map[string]int),
+		},
 	}
 
 	for _, opt := range opts {
 		opt(rm)
 	}
 
+	rm.normalizeDiskConfig()
+
 	return rm
+}
+
+func (rm *ResourceMonitor) normalizeDiskConfig() {
+	if rm.diskUsageFunc == nil {
+		rm.diskUsageFunc = getDiskUsage
+	}
+	if strings.TrimSpace(rm.diskConfig.Path) == "" {
+		rm.diskConfig.Path = "/"
+	}
+	if rm.diskConfig.WarnPercent < 0 {
+		rm.diskConfig.WarnPercent = 0
+	}
+	if rm.diskConfig.CriticalPercent < 0 {
+		rm.diskConfig.CriticalPercent = 0
+	}
+	if rm.diskConfig.ResumePercent <= 0 {
+		rm.diskConfig.ResumePercent = rm.diskConfig.WarnPercent
+	}
+	if rm.diskConfig.CriticalPercent > 0 && rm.diskConfig.WarnPercent > 0 && rm.diskConfig.WarnPercent > rm.diskConfig.CriticalPercent {
+		rm.diskConfig.WarnPercent = rm.diskConfig.CriticalPercent
+	}
 }
 
 // Start begins the resource monitoring loop.
@@ -156,6 +261,9 @@ func (rm *ResourceMonitor) Start(ctx context.Context) {
 		Dur("interval", rm.interval).
 		Int64("memory_limit_mb", rm.limits.MaxMemoryBytes/(1024*1024)).
 		Float64("cpu_limit_pct", rm.limits.MaxCPUPercent).
+		Float64("disk_warn_pct", rm.diskConfig.WarnPercent).
+		Float64("disk_critical_pct", rm.diskConfig.CriticalPercent).
+		Str("disk_path", rm.diskConfig.Path).
 		Msg("resource monitor started")
 }
 
@@ -198,6 +306,9 @@ func (rm *ResourceMonitor) UnregisterAgent(agentID string) {
 	defer rm.mu.Unlock()
 
 	delete(rm.agents, agentID)
+	if rm.diskState.pausedAgents != nil {
+		delete(rm.diskState.pausedAgents, agentID)
+	}
 
 	rm.logger.Debug().
 		Str("agent_id", agentID).
@@ -266,6 +377,7 @@ func (rm *ResourceMonitor) monitorLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			rm.checkAllAgents()
+			rm.checkDiskUsage()
 		}
 	}
 }
@@ -293,6 +405,140 @@ func (rm *ResourceMonitor) checkAllAgents() {
 		state.usage = usage
 		rm.checkLimits(state)
 	}
+}
+
+func (rm *ResourceMonitor) checkDiskUsage() {
+	if !rm.diskMonitoringEnabled() {
+		return
+	}
+
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	usage, err := rm.diskUsageFunc(rm.diskConfig.Path)
+	if err != nil {
+		rm.logger.Debug().Err(err).Str("path", rm.diskConfig.Path).Msg("failed to measure disk usage")
+		return
+	}
+
+	rm.diskState.lastUsage = usage
+	rm.diskState.lastCheckedAt = time.Now()
+
+	prevLevel := rm.diskState.level
+	level := rm.diskUsageLevel(usage.UsedPercent)
+	rm.diskState.level = level
+
+	if level != prevLevel {
+		rm.handleDiskLevelChange(prevLevel, level, usage)
+	}
+
+	if rm.diskConfig.PauseAgents {
+		rm.handleDiskPause(level, usage)
+	}
+}
+
+func (rm *ResourceMonitor) diskMonitoringEnabled() bool {
+	return rm.diskConfig.WarnPercent > 0 || rm.diskConfig.CriticalPercent > 0
+}
+
+func (rm *ResourceMonitor) diskUsageLevel(usedPercent float64) diskUsageLevel {
+	if rm.diskConfig.CriticalPercent > 0 && usedPercent >= rm.diskConfig.CriticalPercent {
+		return diskUsageCritical
+	}
+	if rm.diskConfig.WarnPercent > 0 && usedPercent >= rm.diskConfig.WarnPercent {
+		return diskUsageWarn
+	}
+	return diskUsageOK
+}
+
+func (rm *ResourceMonitor) handleDiskLevelChange(prev, current diskUsageLevel, usage DiskUsage) {
+	switch current {
+	case diskUsageCritical:
+		msg := fmt.Sprintf("disk usage critical: %.1f%% used (%s free) on %s", usage.UsedPercent, formatBytes(usage.FreeBytes), usage.Path)
+		rm.logger.Warn().Float64("used_pct", usage.UsedPercent).Str("path", usage.Path).Msg(msg)
+		rm.publishDiskAlert("disk_critical", msg, false)
+	case diskUsageWarn:
+		msg := fmt.Sprintf("disk usage high: %.1f%% used (%s free) on %s", usage.UsedPercent, formatBytes(usage.FreeBytes), usage.Path)
+		rm.logger.Warn().Float64("used_pct", usage.UsedPercent).Str("path", usage.Path).Msg(msg)
+		rm.publishDiskAlert("disk_low", msg, true)
+	case diskUsageOK:
+		if prev != diskUsageOK {
+			msg := fmt.Sprintf("disk usage recovered: %.1f%% used (%s free) on %s", usage.UsedPercent, formatBytes(usage.FreeBytes), usage.Path)
+			rm.logger.Info().Float64("used_pct", usage.UsedPercent).Str("path", usage.Path).Msg(msg)
+		}
+	}
+}
+
+func (rm *ResourceMonitor) handleDiskPause(level diskUsageLevel, usage DiskUsage) {
+	if level == diskUsageCritical {
+		rm.pauseAgentsForDisk()
+		return
+	}
+
+	resumeAt := rm.diskConfig.ResumePercent
+	if resumeAt <= 0 {
+		resumeAt = rm.diskConfig.WarnPercent
+	}
+	if usage.UsedPercent <= resumeAt {
+		rm.resumeAgentsForDisk()
+	}
+}
+
+func (rm *ResourceMonitor) pauseAgentsForDisk() {
+	if rm.diskState.pausedAgents == nil {
+		rm.diskState.pausedAgents = make(map[string]int)
+	}
+
+	for _, state := range rm.agents {
+		if state.pid <= 0 {
+			continue
+		}
+		if _, alreadyPaused := rm.diskState.pausedAgents[state.agentID]; alreadyPaused {
+			continue
+		}
+		if err := signalProcess(state.pid, syscall.SIGSTOP); err != nil {
+			rm.logger.Warn().Err(err).Str("agent_id", state.agentID).Int("pid", state.pid).Msg("failed to pause agent due to disk pressure")
+			continue
+		}
+		rm.diskState.pausedAgents[state.agentID] = state.pid
+		rm.logger.Warn().Str("agent_id", state.agentID).Int("pid", state.pid).Msg("paused agent due to disk pressure")
+	}
+}
+
+func (rm *ResourceMonitor) resumeAgentsForDisk() {
+	if len(rm.diskState.pausedAgents) == 0 {
+		return
+	}
+
+	for agentID, pid := range rm.diskState.pausedAgents {
+		if state, ok := rm.agents[agentID]; ok && state.pid > 0 {
+			pid = state.pid
+		}
+		if err := signalProcess(pid, syscall.SIGCONT); err != nil {
+			rm.logger.Warn().Err(err).Str("agent_id", agentID).Int("pid", pid).Msg("failed to resume agent after disk pressure")
+			continue
+		}
+		delete(rm.diskState.pausedAgents, agentID)
+		rm.logger.Info().Str("agent_id", agentID).Int("pid", pid).Msg("resumed agent after disk pressure")
+	}
+}
+
+func (rm *ResourceMonitor) publishDiskAlert(code, message string, recoverable bool) {
+	if rm.server == nil {
+		return
+	}
+	rm.server.publishError("", "", code, message, recoverable)
+}
+
+func signalProcess(pid int, sig syscall.Signal) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid pid %d", pid)
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return process.Signal(sig)
 }
 
 // measureUsage measures the resource usage of a process.
@@ -420,6 +666,47 @@ func (rm *ResourceMonitor) getCPUUsage(pid int) (float64, error) {
 
 	cpuUsage := 100.0 * (float64(totalTime) / float64(clockTicks)) / seconds
 	return cpuUsage, nil
+}
+
+func getDiskUsage(path string) (DiskUsage, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return DiskUsage{}, err
+	}
+
+	total := stat.Blocks * uint64(stat.Bsize)
+	free := stat.Bavail * uint64(stat.Bsize)
+	used := total - free
+
+	var usedPercent float64
+	if total > 0 {
+		usedPercent = (float64(used) / float64(total)) * 100
+	}
+
+	return DiskUsage{
+		Path:        path,
+		TotalBytes:  total,
+		FreeBytes:   free,
+		UsedBytes:   used,
+		UsedPercent: usedPercent,
+	}, nil
+}
+
+func formatBytes(value uint64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+	div, exp := uint64(unit), 0
+	for n := value / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	suffixes := []string{"KB", "MB", "GB", "TB", "PB", "EB"}
+	if exp >= len(suffixes) {
+		exp = len(suffixes) - 1
+	}
+	return fmt.Sprintf("%.1f %s", float64(value)/float64(div), suffixes[exp])
 }
 
 // checkLimits checks if an agent exceeds resource limits and takes action.

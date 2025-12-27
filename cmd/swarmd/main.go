@@ -29,6 +29,12 @@ func main() {
 	configFile := flag.String("config", "", "config file (default is $HOME/.config/swarm/config.yaml)")
 	logLevel := flag.String("log-level", "", "override logging level (debug, info, warn, error)")
 	logFormat := flag.String("log-format", "", "override logging format (json, console)")
+	defaultDisk := swarmd.DefaultDiskMonitorConfig()
+	diskPath := flag.String("disk-path", "", "filesystem path to monitor for disk usage")
+	diskWarn := flag.Float64("disk-warn", defaultDisk.WarnPercent, "disk usage percent to warn at")
+	diskCritical := flag.Float64("disk-critical", defaultDisk.CriticalPercent, "disk usage percent to treat as critical")
+	diskResume := flag.Float64("disk-resume", defaultDisk.ResumePercent, "disk usage percent to resume paused agents")
+	diskPause := flag.Bool("disk-pause", defaultDisk.PauseAgents, "pause agent processes when disk is critically full")
 	flag.Parse()
 
 	cfg, loader, err := loadConfig(*configFile)
@@ -68,9 +74,22 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	diskConfig := swarmd.DefaultDiskMonitorConfig()
+	if cfg.Global.DataDir != "" {
+		diskConfig.Path = cfg.Global.DataDir
+	}
+	if *diskPath != "" {
+		diskConfig.Path = *diskPath
+	}
+	diskConfig.WarnPercent = *diskWarn
+	diskConfig.CriticalPercent = *diskCritical
+	diskConfig.ResumePercent = *diskResume
+	diskConfig.PauseAgents = *diskPause
+
 	daemon, err := swarmd.New(cfg, logger, swarmd.Options{
-		Hostname: *hostname,
-		Port:     *port,
+		Hostname:          *hostname,
+		Port:              *port,
+		DiskMonitorConfig: &diskConfig,
 	})
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to initialize swarmd")

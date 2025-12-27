@@ -35,6 +35,9 @@ type Options struct {
 
 	// DefaultResourceLimits sets the default resource limits for agents.
 	DefaultResourceLimits *ResourceLimits
+
+	// DiskMonitorConfig customizes disk usage monitoring.
+	DiskMonitorConfig *DiskMonitorConfig
 }
 
 // Daemon is the long-running process responsible for node orchestration.
@@ -113,6 +116,13 @@ func New(cfg *config.Config, logger zerolog.Logger, opts Options) (*Daemon, erro
 				}
 			}),
 		}
+		diskConfig := DefaultDiskMonitorConfig()
+		if opts.DiskMonitorConfig != nil {
+			diskConfig = *opts.DiskMonitorConfig
+		} else if cfg.Global.DataDir != "" {
+			diskConfig.Path = cfg.Global.DataDir
+		}
+		rmOpts = append(rmOpts, WithDiskMonitorConfig(diskConfig))
 		if opts.DefaultResourceLimits != nil {
 			rmOpts = append(rmOpts, WithDefaultLimits(*opts.DefaultResourceLimits))
 		}

@@ -28,6 +28,70 @@ func TestDefaultResourceLimits(t *testing.T) {
 	}
 }
 
+func TestDefaultDiskMonitorConfig(t *testing.T) {
+	cfg := DefaultDiskMonitorConfig()
+	if cfg.Path == "" {
+		t.Error("expected disk monitor path to be set")
+	}
+	if cfg.WarnPercent <= 0 {
+		t.Errorf("expected warn percent > 0, got %.1f", cfg.WarnPercent)
+	}
+	if cfg.CriticalPercent <= 0 {
+		t.Errorf("expected critical percent > 0, got %.1f", cfg.CriticalPercent)
+	}
+	if cfg.ResumePercent <= 0 {
+		t.Errorf("expected resume percent > 0, got %.1f", cfg.ResumePercent)
+	}
+}
+
+func TestResourceMonitor_DiskLevelTransitions(t *testing.T) {
+	logger := zerolog.Nop()
+	usages := []DiskUsage{
+		{Path: "/tmp", UsedPercent: 50, FreeBytes: 100},
+		{Path: "/tmp", UsedPercent: 87, FreeBytes: 50},
+		{Path: "/tmp", UsedPercent: 97, FreeBytes: 10},
+		{Path: "/tmp", UsedPercent: 70, FreeBytes: 80},
+	}
+	index := 0
+
+	rm := NewResourceMonitor(logger, nil,
+		WithDiskMonitorConfig(DiskMonitorConfig{
+			Path:            "/tmp",
+			WarnPercent:     80,
+			CriticalPercent: 95,
+			ResumePercent:   75,
+		}),
+		WithDiskUsageFunc(func(path string) (DiskUsage, error) {
+			if index >= len(usages) {
+				return usages[len(usages)-1], nil
+			}
+			usage := usages[index]
+			index++
+			return usage, nil
+		}),
+	)
+
+	rm.checkDiskUsage()
+	if rm.diskState.level != diskUsageOK {
+		t.Errorf("expected disk level ok, got %v", rm.diskState.level)
+	}
+
+	rm.checkDiskUsage()
+	if rm.diskState.level != diskUsageWarn {
+		t.Errorf("expected disk level warn, got %v", rm.diskState.level)
+	}
+
+	rm.checkDiskUsage()
+	if rm.diskState.level != diskUsageCritical {
+		t.Errorf("expected disk level critical, got %v", rm.diskState.level)
+	}
+
+	rm.checkDiskUsage()
+	if rm.diskState.level != diskUsageOK {
+		t.Errorf("expected disk level ok after recovery, got %v", rm.diskState.level)
+	}
+}
+
 func TestResourceMonitor_RegisterUnregister(t *testing.T) {
 	logger := zerolog.Nop()
 	rm := NewResourceMonitor(logger, nil)
