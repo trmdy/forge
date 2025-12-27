@@ -86,8 +86,10 @@ func sampleQueueEditors() map[string]*queueEditorState {
 	editors := make(map[string]*queueEditorState, len(agents))
 	for _, agent := range agents {
 		editors[agent] = &queueEditorState{
-			Items:    sampleQueueItems(),
-			Selected: 0,
+			Items:       sampleQueueItems(),
+			Selected:    0,
+			Expanded:    make(map[string]bool),
+			DeleteIndex: -1,
 		}
 	}
 	return editors
@@ -98,20 +100,37 @@ func sampleQueueItems() []queueItem {
 		{
 			ID:      "q-01",
 			Kind:    models.QueueItemTypeMessage,
-			Summary: "Summarize latest PR feedback and next steps.",
+			Summary: "Review PR comments and propose fixes.",
 			Status:  models.QueueItemStatusPending,
 		},
 		{
-			ID:      "q-02",
-			Kind:    models.QueueItemTypePause,
-			Summary: "Pause 5m (waiting on reviewer).",
-			Status:  models.QueueItemStatusPending,
+			ID:            "q-02",
+			Kind:          models.QueueItemTypeConditional,
+			Summary:       "Continue with deployment checklist.",
+			Status:        models.QueueItemStatusPending,
+			ConditionType: models.ConditionTypeWhenIdle,
 		},
 		{
-			ID:      "q-03",
-			Kind:    models.QueueItemTypeMessage,
-			Summary: "Draft follow-up message to the team.",
-			Status:  models.QueueItemStatusPending,
+			ID:              "q-03",
+			Kind:            models.QueueItemTypePause,
+			Summary:         "Waiting on reviewer",
+			Status:          models.QueueItemStatusPending,
+			DurationSeconds: 90,
+		},
+		{
+			ID:       "q-04",
+			Kind:     models.QueueItemTypeMessage,
+			Summary:  "Draft follow-up message to the team.",
+			Status:   models.QueueItemStatusDispatched,
+			Attempts: 1,
+		},
+		{
+			ID:       "q-05",
+			Kind:     models.QueueItemTypeMessage,
+			Summary:  "Summarize latest PR feedback and next steps.",
+			Status:   models.QueueItemStatusFailed,
+			Attempts: 2,
+			Error:    "Rate limited by provider",
 		},
 	}
 }

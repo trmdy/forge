@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -100,6 +101,8 @@ type model struct {
 	showInspector              bool
 	selectedAgent              string
 	selectedAgentIndex         int
+	selectedAgents             map[string]bool
+	selectionAnchor            string
 	pausedAll                  bool
 	statusMsg                  string
 	statusSeverity             statusSeverity
@@ -131,6 +134,7 @@ type model struct {
 	actionConfirmOpen          bool
 	actionConfirmAction        string
 	actionConfirmAgent         string
+	actionConfirmTargets       []string
 	profileSelectOpen          bool
 	profileSelectIndex         int
 	profileSelectOptions       []string
@@ -140,13 +144,17 @@ type model struct {
 	actionInFlightAgent        string
 	queueEditorOpen            bool
 	queueEditors               map[string]*queueEditorState
+	queueEditorBulkTargets     []string
 	queueEditOpen              bool
 	queueEditBuffer            string
 	queueEditIndex             int
 	queueEditAgent             string
 	queueEditMode              queueEditMode
 	queueEditKind              models.QueueItemType
+	queueEditCondition         models.ConditionType
+	queueEditConditionExpr     string
 	queueEditPrompt            string
+	queueEditBulkTargets       []string
 	transcriptSearchOpen       bool
 	transcriptSearchQuery      string
 	paletteOpen                bool
@@ -159,6 +167,7 @@ type model struct {
 	messagePaletteSequences    map[string]*sequences.Sequence
 	messagePaletteSelection    messagePaletteSelection
 	messagePaletteTargetAgent  string
+	messagePaletteTargetAgents []string
 	messagePaletteAgents       []string
 	messagePaletteAgentIndex   int
 	messagePaletteVarIndex     int
@@ -208,10 +217,15 @@ type accountSummary struct {
 }
 
 type queueItem struct {
-	ID      string
-	Kind    models.QueueItemType
-	Summary string
-	Status  models.QueueItemStatus
+	ID              string
+	Kind            models.QueueItemType
+	Summary         string
+	Status          models.QueueItemStatus
+	Attempts        int
+	Error           string
+	ConditionType   models.ConditionType
+	ConditionExpr   string
+	DurationSeconds int
 }
 
 type queueEditMode int
@@ -258,8 +272,11 @@ type messagePaletteEnqueueOption struct {
 }
 
 type queueEditorState struct {
-	Items    []queueItem
-	Selected int
+	Items         []queueItem
+	Selected      int
+	Expanded      map[string]bool
+	DeleteConfirm bool
+	DeleteIndex   int
 }
 
 type approvalItem struct {
@@ -318,6 +335,7 @@ func initialModel() model {
 		selectedView:          viewDashboard,
 		lastUpdated:           now,
 		selectedAgentIndex:    -1,
+		selectedAgents:        make(map[string]bool),
 		agentStates:           make(map[string]models.AgentState),
 		agentInfo:             make(map[string]models.StateInfo),
 		agentLast:             make(map[string]time.Time),
@@ -501,6 +519,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if m.view == viewAgent {
+			if !m.showTranscript {
+				switch msg.String() {
+				case " ", "space":
+					cards := m.agentCards()
+					m.toggleAgentSelectionAt(cards, m.selectedAgentIndexFor(cards))
+					return m, nil
+				case "shift+space":
+					cards := m.agentCards()
+					m.selectAgentRange(cards, m.selectedAgentIndexFor(cards))
+					return m, nil
+				case "ctrl+a":
+					m.selectAllAgents(m.agentCards())
+					return m, nil
+				case "ctrl+shift+a", "ctrl+A":
+					m.clearAgentSelection()
+					return m, nil
+				case "esc":
+					if m.selectionActive() {
+						m.clearAgentSelection()
+						return m, nil
+					}
+				}
+			}
 			switch msg.String() {
 			case "enter":
 				// Drill down into agent detail view
@@ -518,24 +559,66 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "Q":
+				if m.selectionActive() && !m.showTranscript {
+					if m.queueEditorOpen && len(m.queueEditorBulkTargets) > 0 {
+						m.queueEditorOpen = false
+						m.queueEditorBulkTargets = nil
+						m.closeQueueEdit()
+						if state := m.queueEditorStateForAgent(m.selectedAgentName()); state != nil {
+							m.clearQueueDeleteConfirm(state)
+						}
+					} else {
+						m.openBulkQueueEditor()
+					}
+					return m, nil
+				}
 				m.queueEditorOpen = !m.queueEditorOpen
 				if !m.queueEditorOpen {
 					m.closeQueueEdit()
+					m.queueEditorBulkTargets = nil
+					if state := m.queueEditorStateForAgent(m.selectedAgentName()); state != nil {
+						m.clearQueueDeleteConfirm(state)
+					}
 				}
 				return m, nil
 			case "I":
+				if m.selectionActive() && !m.showTranscript {
+					return m, m.requestBulkAgentAction(actionInterrupt, true)
+				}
 				return m, m.requestAgentAction(actionInterrupt, true)
 			case "R":
+				if m.selectionActive() && !m.showTranscript {
+					return m, m.requestBulkAgentAction(actionResume, true)
+				}
 				return m, m.requestAgentAction(actionRestart, true)
 			case "E":
 				return m, m.requestAgentAction(actionExportLogs, false)
 			case "P":
 				// Toggle pause/resume based on current agent state
+				if m.selectionActive() && !m.showTranscript {
+					m.openBulkQueueAdd(models.QueueItemTypePause, "")
+					return m, nil
+				}
 				action := actionPause
 				if card := m.selectedAgentCard(); card != nil && card.State == models.AgentStatePaused {
 					action = actionResume
 				}
 				return m, m.requestAgentAction(action, true)
+			case "K":
+				if m.selectionActive() && !m.showTranscript {
+					return m, m.requestBulkAgentAction(actionTerminate, true)
+				}
+				return m, m.requestAgentAction(actionTerminate, true)
+			case "S":
+				if m.selectionActive() && !m.showTranscript {
+					m.openBulkQueueAdd(models.QueueItemTypeMessage, "")
+					return m, nil
+				}
+			case "T":
+				if m.selectionActive() && !m.showTranscript {
+					m.openMessagePalette()
+					return m, nil
+				}
 			case "V":
 				// View action - toggle inspector and focus on selected agent
 				m.showInspector = true
@@ -858,6 +941,7 @@ const (
 	actionExportLogs    = "export_logs"
 	actionPause         = "pause"
 	actionResume        = "resume"
+	actionTerminate     = "terminate"
 	actionSwitchProfile = "switch_profile"
 	actionView          = "view"
 )
@@ -957,6 +1041,11 @@ func (m *model) viewLines() []string {
 		if line := m.actionConfirmLine(); line != "" {
 			lines = append(lines, line)
 		}
+		if m.selectionActive() {
+			if panel := components.RenderBulkActionPanel(m.styles, m.selectedAgentCount()); panel != "" {
+				lines = append(lines, panel)
+			}
+		}
 		if m.showTranscript && m.transcriptViewer != nil {
 			// Show transcript view instead of agent cards
 			lines = append(lines, "")
@@ -981,9 +1070,11 @@ func (m *model) viewLines() []string {
 		}
 		lines = append(lines, m.styles.Text.Render(fmt.Sprintf("Tracking %d agent(s):", len(m.agentStates))))
 		selectedIndex := m.selectedAgentIndexFor(cards)
+		selectionMode := m.selectionActive()
 		for i, card := range cards {
-			lines = append(lines, components.RenderAgentCard(m.styles, card, i == selectedIndex))
-			if i == selectedIndex {
+			selected := selectionMode && m.selectedAgents[card.Name]
+			lines = append(lines, components.RenderAgentCard(m.styles, card, i == selectedIndex, selected, selectionMode))
+			if i == selectedIndex && !selectionMode {
 				// Show quick action hints below the selected card
 				actionHint := components.RenderQuickActionHint(m.styles, card.State)
 				if actionHint != "" {
@@ -1601,9 +1692,49 @@ func (m model) selectedAgentIndexFor(cards []components.AgentCard) int {
 	return 0
 }
 
+func (m model) selectionActive() bool {
+	return len(m.selectedAgents) > 0
+}
+
+func (m model) selectedAgentCount() int {
+	return len(m.selectedAgents)
+}
+
+func (m model) selectedAgentTargets() []string {
+	cards := m.agentCards()
+	if len(cards) == 0 || len(m.selectedAgents) == 0 {
+		return nil
+	}
+	targets := make([]string, 0, len(m.selectedAgents))
+	for _, card := range cards {
+		name := strings.TrimSpace(card.Name)
+		if name == "" {
+			continue
+		}
+		if m.selectedAgents[name] {
+			targets = append(targets, name)
+		}
+	}
+	return targets
+}
+
+func (m model) explicitAgentTargets() []string {
+	if m.selectionActive() {
+		return m.selectedAgentTargets()
+	}
+	if card := m.selectedAgentCard(); card != nil {
+		name := strings.TrimSpace(card.Name)
+		if name != "" {
+			return []string{name}
+		}
+	}
+	return nil
+}
+
 func (m *model) syncAgentSelection() {
 	cards := m.agentCards()
 	m.ensureAgentSelection(cards)
+	m.pruneAgentSelection(cards)
 }
 
 func (m *model) recordWorkspaceActivity(agentID string, timestamp time.Time) {
@@ -1671,6 +1802,116 @@ func (m *model) ensureAgentSelection(cards []components.AgentCard) {
 	}
 	m.selectedAgentIndex = idx
 	m.selectedAgent = cards[idx].Name
+}
+
+func (m *model) toggleAgentSelection(agent string) {
+	agent = strings.TrimSpace(agent)
+	if agent == "" {
+		return
+	}
+	if m.selectedAgents == nil {
+		m.selectedAgents = make(map[string]bool)
+	}
+	if m.selectedAgents[agent] {
+		delete(m.selectedAgents, agent)
+		if m.selectionAnchor == agent {
+			m.selectionAnchor = ""
+		}
+		return
+	}
+	m.selectedAgents[agent] = true
+	m.selectionAnchor = agent
+}
+
+func (m *model) toggleAgentSelectionAt(cards []components.AgentCard, index int) {
+	if index < 0 || index >= len(cards) {
+		return
+	}
+	m.toggleAgentSelection(cards[index].Name)
+}
+
+func (m *model) selectAgentRange(cards []components.AgentCard, index int) {
+	if index < 0 || index >= len(cards) {
+		return
+	}
+	anchorIndex := index
+	if anchor := strings.TrimSpace(m.selectionAnchor); anchor != "" {
+		for i := range cards {
+			if strings.EqualFold(cards[i].Name, anchor) {
+				anchorIndex = i
+				break
+			}
+		}
+	}
+	if m.selectedAgents == nil {
+		m.selectedAgents = make(map[string]bool)
+	}
+	start := anchorIndex
+	end := index
+	if start > end {
+		start, end = end, start
+	}
+	for i := start; i <= end; i++ {
+		name := strings.TrimSpace(cards[i].Name)
+		if name == "" {
+			continue
+		}
+		m.selectedAgents[name] = true
+	}
+}
+
+func (m *model) selectAllAgents(cards []components.AgentCard) {
+	if len(cards) == 0 {
+		return
+	}
+	if m.selectedAgents == nil {
+		m.selectedAgents = make(map[string]bool)
+	}
+	for _, card := range cards {
+		name := strings.TrimSpace(card.Name)
+		if name == "" {
+			continue
+		}
+		m.selectedAgents[name] = true
+	}
+}
+
+func (m *model) clearAgentSelection() {
+	if len(m.selectedAgents) == 0 {
+		return
+	}
+	m.selectedAgents = make(map[string]bool)
+	m.selectionAnchor = ""
+	m.queueEditorBulkTargets = nil
+	m.queueEditBulkTargets = nil
+}
+
+func (m *model) pruneAgentSelection(cards []components.AgentCard) {
+	if len(m.selectedAgents) == 0 {
+		return
+	}
+	allowed := make(map[string]struct{}, len(cards))
+	for _, card := range cards {
+		name := strings.TrimSpace(card.Name)
+		if name == "" {
+			continue
+		}
+		allowed[name] = struct{}{}
+	}
+	for name := range m.selectedAgents {
+		if _, ok := allowed[name]; !ok {
+			delete(m.selectedAgents, name)
+		}
+	}
+	if m.selectionAnchor != "" {
+		if _, ok := allowed[m.selectionAnchor]; !ok {
+			m.selectionAnchor = ""
+		}
+	}
+	if len(m.selectedAgents) == 0 {
+		m.queueEditorBulkTargets = nil
+		m.queueEditBulkTargets = nil
+	}
 }
 
 func (m *model) moveAgentSelection(delta int) {
@@ -2008,11 +2249,19 @@ func (m model) queueEditorLines() []string {
 		agent = card.Name
 	}
 
+	state := m.queueEditorStateForAgent(agent)
+	count := 0
+	if state != nil {
+		count = len(state.Items)
+	}
+
 	lines := []string{
-		m.styles.Text.Render("Queue editor"),
-		m.styles.Muted.Render("↑↓/jk: move | J/K or Ctrl+↑/↓: reorder | e: edit | d: delete"),
-		m.styles.Muted.Render("m: add msg | p: add pause | c: add conditional | esc: close"),
-		m.styles.Muted.Render(fmt.Sprintf("Agent: %s", agent)),
+		m.styles.Text.Render(fmt.Sprintf("Queue for agent %s (%d items)", agent, count)),
+		m.styles.Muted.Render("j/k move | J/K reorder | i insert | p pause | g gate | t template"),
+		m.styles.Muted.Render("Enter edit | e expand | d delete | r retry | c copy | esc close"),
+	}
+	if len(m.queueEditorBulkTargets) > 0 {
+		lines = append(lines, m.styles.Info.Render(fmt.Sprintf("Bulk mode: %d agent(s)", len(m.queueEditorBulkTargets))))
 	}
 
 	if card == nil {
@@ -2020,26 +2269,27 @@ func (m model) queueEditorLines() []string {
 		return lines
 	}
 
-	state := m.queueEditorStateForAgent(agent)
 	if state == nil || len(state.Items) == 0 {
-		lines = append(lines, m.styles.Muted.Render("Queue is empty. Press m/p to add items."))
+		lines = append(lines, m.styles.Muted.Render("Queue is empty. Press i/p/g to add items."))
 		if m.queueEditOpen {
 			lines = append(lines, m.queueEditLines()...)
 		}
 		return lines
 	}
+	if state.DeleteConfirm {
+		lines = append(lines, m.styles.Warning.Render("Press d again to delete the selected item (Esc to cancel)."))
+	}
 
 	maxWidth := m.inspectorContentWidth()
+	header := fmt.Sprintf("%3s  %-8s  %-9s  %s", "POS", "TYPE", "STATUS", "CONTENT")
+	lines = append(lines, m.styles.Muted.Render(header))
+	firstPending := firstPendingQueueIndex(state.Items)
+
 	for i, item := range state.Items {
-		prefix := "  "
-		if i == state.Selected {
-			prefix = "> "
-		}
-		label := fmt.Sprintf("[%s] %s", queueItemTypeLabel(item.Kind), queueItemSummary(item))
-		if item.Status != "" {
-			label = fmt.Sprintf("[%s] %s (%s)", queueItemTypeLabel(item.Kind), queueItemSummary(item), item.Status)
-		}
-		line := prefix + label
+		blockReason := queueItemBlockReason(item, i, firstPending, card)
+		statusLabel := queueItemStatusLabel(item, blockReason)
+		contentLabel := queueItemContentLabel(item)
+		line := formatQueueTimelineRow(i+1, queueItemTypeTimelineLabel(item.Kind), statusLabel, contentLabel)
 		if maxWidth > 0 {
 			line = truncateText(line, maxWidth)
 		}
@@ -2047,6 +2297,26 @@ func (m model) queueEditorLines() []string {
 			lines = append(lines, m.styles.Accent.Render(line))
 		} else {
 			lines = append(lines, m.styles.Text.Render(line))
+		}
+
+		showDetail := i == state.Selected || blockReason != "" || strings.TrimSpace(item.Error) != ""
+		if state.Expanded != nil && state.Expanded[item.ID] {
+			showDetail = true
+		}
+		if showDetail {
+			cooldownLabel := ""
+			if blockReason == "cooldown" && card != nil && card.CooldownUntil != nil {
+				remaining := time.Until(*card.CooldownUntil)
+				if remaining > 0 {
+					cooldownLabel = formatDurationLabel(int(remaining.Seconds()))
+				}
+			}
+			if detail := queueItemDetailLine(item, blockReason, cooldownLabel); detail != "" {
+				lines = append(lines, wrapIndented(detail, maxWidth, m.styles.Muted, "    ")...)
+			}
+			if state.Expanded != nil && state.Expanded[item.ID] {
+				lines = append(lines, wrapIndented(contentLabel, maxWidth, m.styles.Muted, "    ")...)
+			}
 		}
 	}
 
@@ -2085,25 +2355,228 @@ func (m model) queueEditLines() []string {
 	}
 }
 
-func queueItemSummary(item queueItem) string {
-	summary := strings.TrimSpace(item.Summary)
-	if summary == "" {
-		return "--"
+func queueEditPromptForItem(item queueItem) string {
+	switch item.Kind {
+	case models.QueueItemTypeMessage:
+		return "Message text"
+	case models.QueueItemTypePause:
+		return "Pause duration (e.g., 5m)"
+	case models.QueueItemTypeConditional:
+		label := queueItemConditionLabel(item.ConditionType, item.ConditionExpr)
+		if label == "" {
+			return "Conditional message"
+		}
+		return fmt.Sprintf("Message (%s)", label)
+	default:
+		return "Queue item"
 	}
-	return summary
 }
 
-func queueItemTypeLabel(kind models.QueueItemType) string {
+func parseQueueDurationSeconds(text string) (int, error) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return 0, fmt.Errorf("Pause duration is required.")
+	}
+	if value, err := strconv.Atoi(trimmed); err == nil {
+		if value <= 0 {
+			return 0, fmt.Errorf("Pause duration must be greater than 0.")
+		}
+		return value, nil
+	}
+	duration, err := time.ParseDuration(trimmed)
+	if err != nil {
+		return 0, fmt.Errorf("Invalid pause duration.")
+	}
+	if duration <= 0 {
+		return 0, fmt.Errorf("Pause duration must be greater than 0.")
+	}
+	return int(duration.Seconds()), nil
+}
+
+func formatQueueTimelineRow(pos int, itemType string, status string, content string) string {
+	return fmt.Sprintf("%3d  %-8s  %-9s  %s", pos, itemType, status, content)
+}
+
+func queueItemTypeTimelineLabel(kind models.QueueItemType) string {
 	switch kind {
 	case models.QueueItemTypeMessage:
-		return "MSG"
+		return "message"
 	case models.QueueItemTypePause:
-		return "PAUSE"
+		return "pause"
 	case models.QueueItemTypeConditional:
-		return "COND"
+		return "gate"
 	default:
-		return strings.ToUpper(string(kind))
+		return strings.ToLower(string(kind))
 	}
+}
+
+func queueItemStatusLabel(item queueItem, blockedReason string) string {
+	status := item.Status
+	if status == "" {
+		status = models.QueueItemStatusPending
+	}
+	if status == models.QueueItemStatusPending && blockedReason != "" {
+		return "blocked"
+	}
+	return string(status)
+}
+
+func queueItemContentLabel(item queueItem) string {
+	switch item.Kind {
+	case models.QueueItemTypeMessage:
+		return queueMessageLabel(item.Summary)
+	case models.QueueItemTypePause:
+		duration := formatDurationLabel(item.DurationSeconds)
+		label := "pause"
+		if duration != "" {
+			label = fmt.Sprintf("pause %s", duration)
+		}
+		reason := strings.TrimSpace(item.Summary)
+		if reason != "" {
+			label = fmt.Sprintf("%s - %s", label, reason)
+		}
+		return label
+	case models.QueueItemTypeConditional:
+		condition := queueItemConditionLabel(item.ConditionType, item.ConditionExpr)
+		message := queueMessageLabel(item.Summary)
+		if condition == "" {
+			return message
+		}
+		if strings.TrimSpace(message) == "" {
+			return condition
+		}
+		return fmt.Sprintf("%s: %s", condition, message)
+	default:
+		return queueMessageLabel(item.Summary)
+	}
+}
+
+func queueMessageLabel(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "--"
+	}
+	return fmt.Sprintf("\"%s\" (%dc)", trimmed, len([]rune(trimmed)))
+}
+
+func queueItemConditionLabel(condition models.ConditionType, expr string) string {
+	switch condition {
+	case models.ConditionTypeWhenIdle:
+		return "when idle"
+	case models.ConditionTypeAfterCooldown:
+		return "after cooldown"
+	case models.ConditionTypeAfterPrevious:
+		return "after previous"
+	case models.ConditionTypeCustomExpression:
+		expr = strings.TrimSpace(expr)
+		if expr == "" {
+			return "condition"
+		}
+		return fmt.Sprintf("when %s", expr)
+	default:
+		return ""
+	}
+}
+
+func queueItemBlockReason(item queueItem, index int, firstPending int, card *components.AgentCard) string {
+	status := item.Status
+	if status == "" {
+		status = models.QueueItemStatusPending
+	}
+	if status != models.QueueItemStatusPending {
+		return ""
+	}
+	if firstPending >= 0 && index != firstPending {
+		return "dependency"
+	}
+	if item.Kind == models.QueueItemTypeConditional {
+		switch item.ConditionType {
+		case models.ConditionTypeWhenIdle:
+			if card != nil && card.State != models.AgentStateIdle {
+				return "idle_gate"
+			}
+		case models.ConditionTypeAfterCooldown:
+			if card != nil && card.CooldownUntil != nil && time.Until(*card.CooldownUntil) > 0 {
+				return "cooldown"
+			}
+		case models.ConditionTypeAfterPrevious, models.ConditionTypeCustomExpression:
+			return "dependency"
+		default:
+			return "dependency"
+		}
+	}
+	if card != nil {
+		return agentStateBlockReason(card.State)
+	}
+	return ""
+}
+
+func agentStateBlockReason(state models.AgentState) string {
+	switch state {
+	case models.AgentStatePaused:
+		return "paused"
+	case models.AgentStateRateLimited:
+		return "cooldown"
+	case models.AgentStateWorking, models.AgentStateStarting, models.AgentStateAwaitingApproval:
+		return "busy"
+	case models.AgentStateError, models.AgentStateStopped:
+		return "busy"
+	default:
+		return ""
+	}
+}
+
+func queueItemDetailLine(item queueItem, blockedReason string, cooldown string) string {
+	parts := []string{}
+	if blockedReason != "" {
+		label := blockedReason
+		if blockedReason == "cooldown" && cooldown != "" {
+			label = fmt.Sprintf("%s (%s)", blockedReason, cooldown)
+		}
+		parts = append(parts, fmt.Sprintf("blocked: %s", label))
+	}
+	if item.Attempts > 0 {
+		parts = append(parts, fmt.Sprintf("attempts: %d", item.Attempts))
+	}
+	if strings.TrimSpace(item.Error) != "" {
+		parts = append(parts, fmt.Sprintf("error: %s", strings.TrimSpace(item.Error)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " | ")
+}
+
+func firstPendingQueueIndex(items []queueItem) int {
+	for i, item := range items {
+		status := item.Status
+		if status == "" {
+			status = models.QueueItemStatusPending
+		}
+		if status == models.QueueItemStatusPending {
+			return i
+		}
+	}
+	return -1
+}
+
+func formatDurationLabel(seconds int) string {
+	if seconds <= 0 {
+		return ""
+	}
+	duration := time.Duration(seconds) * time.Second
+	if duration < time.Minute {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	if duration < time.Hour {
+		minutes := seconds / 60
+		remaining := seconds % 60
+		if remaining == 0 {
+			return fmt.Sprintf("%dm", minutes)
+		}
+		return fmt.Sprintf("%dm%02ds", minutes, remaining)
+	}
+	return duration.Round(time.Minute).String()
 }
 
 func findAgentCardByName(cards []components.AgentCard, name string) *components.AgentCard {
@@ -2936,6 +3409,9 @@ func (m model) modeLine() string {
 	if m.transcriptSearchOpen {
 		return m.styles.Info.Render("Mode: Transcript search")
 	}
+	if m.view == viewAgent && m.selectionActive() && !m.showTranscript {
+		return m.styles.Info.Render(fmt.Sprintf("Mode: Selection (%d agent(s))", m.selectedAgentCount()))
+	}
 	if m.showTranscript && m.view == viewAgent {
 		return m.styles.Info.Render("Mode: Transcript")
 	}
@@ -3009,7 +3485,13 @@ func (m model) helpLines() []string {
 	case viewWorkspace:
 		lines = append(lines, m.styles.Muted.Render("Workspace: ↑↓←→/hjkl move | Enter open | / filter | Ctrl+L clear | A approvals"))
 	case viewAgent:
-		lines = append(lines, m.styles.Muted.Render("Agents: ↑↓←→/hjkl select | / filter | Ctrl+L clear | t transcript | Q queue"))
+		lines = append(lines, m.styles.Muted.Render("Agents: ↑↓←→/hjkl move | Space toggle | Shift+Space range | Ctrl+A all | Ctrl+Shift+A clear"))
+		lines = append(lines, m.styles.Muted.Render("Filters: / filter | Ctrl+L clear | t transcript | Q queue"))
+		lines = append(lines, m.styles.Muted.Render("Bulk: P pause | R resume | T template | Q queue | K kill | I interrupt | S send | Esc clear"))
+		if m.queueEditorOpen {
+			lines = append(lines, m.styles.Muted.Render("Queue editor: j/k move | J/K reorder | i insert | p pause | g gate | t template"))
+			lines = append(lines, m.styles.Muted.Render("Queue editor: Enter edit | e expand | d delete | r retry | c copy | esc close"))
+		}
 		if m.showTranscript {
 			autoHint := "a auto-scroll on"
 			if !m.transcriptAutoScroll {
@@ -3082,6 +3564,7 @@ func (m *model) openMessagePalette() {
 	m.messagePaletteStage = messagePaletteStageList
 	m.messagePaletteSelection = messagePaletteSelection{}
 	m.messagePaletteTargetAgent = ""
+	m.messagePaletteTargetAgents = nil
 	m.messagePaletteAgents = nil
 	m.messagePaletteAgentIndex = 0
 	m.messagePaletteVarIndex = 0
@@ -3096,6 +3579,7 @@ func (m *model) closeMessagePalette() {
 	m.messagePaletteStage = messagePaletteStageList
 	m.messagePaletteSelection = messagePaletteSelection{}
 	m.messagePaletteTargetAgent = ""
+	m.messagePaletteTargetAgents = nil
 	m.messagePaletteAgents = nil
 	m.messagePaletteAgentIndex = 0
 	m.messagePaletteVarIndex = 0
@@ -3204,7 +3688,13 @@ func (m *model) selectMessagePaletteItem() {
 	}
 
 	if m.hasExplicitAgentSelection() {
-		m.messagePaletteTargetAgent = m.selectedAgentName()
+		targets := m.explicitAgentTargets()
+		if len(targets) == 0 {
+			m.setStatus("No agent selected.", statusWarn)
+			return
+		}
+		m.messagePaletteTargetAgents = targets
+		m.messagePaletteTargetAgent = targets[0]
 		m.openMessagePaletteVariables()
 		return
 	}
@@ -3265,7 +3755,9 @@ func (m *model) updateMessagePaletteAgent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setStatus("No agent selected.", statusWarn)
 			return m, nil
 		}
-		m.messagePaletteTargetAgent = m.messagePaletteAgents[m.messagePaletteAgentIndex]
+		target := m.messagePaletteAgents[m.messagePaletteAgentIndex]
+		m.messagePaletteTargetAgents = []string{target}
+		m.messagePaletteTargetAgent = target
 		m.openMessagePaletteVariables()
 	case "ctrl+c":
 		return m, tea.Quit
@@ -3496,6 +3988,9 @@ func (m model) messagePaletteAgentOptions() []string {
 }
 
 func (m model) hasExplicitAgentSelection() bool {
+	if m.selectionActive() {
+		return true
+	}
 	if strings.TrimSpace(m.selectedAgent) != "" {
 		return true
 	}
@@ -3588,8 +4083,13 @@ func (m model) messagePaletteEnqueueMode() messagePaletteEnqueueMode {
 }
 
 func (m *model) applyMessagePaletteSelection() {
-	agent := strings.TrimSpace(m.messagePaletteTargetAgent)
-	if agent == "" {
+	targets := m.messagePaletteTargetAgents
+	if len(targets) == 0 {
+		if agent := strings.TrimSpace(m.messagePaletteTargetAgent); agent != "" {
+			targets = []string{agent}
+		}
+	}
+	if len(targets) == 0 {
 		m.setStatus("No agent selected.", statusWarn)
 		return
 	}
@@ -3602,14 +4102,25 @@ func (m *model) applyMessagePaletteSelection() {
 		m.setStatus("No queue items generated.", statusWarn)
 		return
 	}
-	state := m.ensureQueueEditorState(agent)
-	if state == nil {
+	queued := 0
+	for _, agent := range targets {
+		state := m.ensureQueueEditorState(agent)
+		if state == nil {
+			continue
+		}
+		queueItems := messagePaletteQueueItemsFromModels(state, items)
+		m.insertMessagePaletteItems(state, queueItems, m.messagePaletteEnqueueMode())
+		queued++
+	}
+	if queued == 0 {
 		m.setStatus("Queue unavailable.", statusWarn)
 		return
 	}
-	queueItems := messagePaletteQueueItemsFromModels(state, items)
-	m.insertMessagePaletteItems(state, queueItems, m.messagePaletteEnqueueMode())
-	m.setStatus(fmt.Sprintf("Queued %s for %s.", label, agent), statusInfo)
+	if queued > 1 {
+		m.setStatus(fmt.Sprintf("Queued %s for %d agents.", label, queued), statusInfo)
+		return
+	}
+	m.setStatus(fmt.Sprintf("Queued %s.", label), statusInfo)
 }
 
 func (m *model) messagePaletteQueueItems() ([]models.QueueItem, string, error) {
@@ -3718,11 +4229,17 @@ func messagePaletteQueueItemsFromModels(state *queueEditorState, items []models.
 		if status == "" {
 			status = models.QueueItemStatusPending
 		}
+		summary, conditionType, conditionExpr, durationSeconds := messagePaletteQueueItemDetails(item)
 		out = append(out, queueItem{
-			ID:      fmt.Sprintf("q-%02d", nextIndex),
-			Kind:    item.Type,
-			Summary: messagePaletteQueueItemSummary(item),
-			Status:  status,
+			ID:              fmt.Sprintf("q-%02d", nextIndex),
+			Kind:            item.Type,
+			Summary:         summary,
+			Status:          status,
+			Attempts:        item.Attempts,
+			Error:           item.Error,
+			ConditionType:   conditionType,
+			ConditionExpr:   conditionExpr,
+			DurationSeconds: durationSeconds,
 		})
 		nextIndex++
 	}
@@ -3743,46 +4260,28 @@ func (m *model) insertMessagePaletteItems(state *queueEditorState, items []queue
 	}
 }
 
-func messagePaletteQueueItemSummary(item models.QueueItem) string {
+func messagePaletteQueueItemDetails(item models.QueueItem) (string, models.ConditionType, string, int) {
 	switch item.Type {
 	case models.QueueItemTypeMessage:
 		var payload models.MessagePayload
 		if err := json.Unmarshal(item.Payload, &payload); err != nil {
-			return "invalid message payload"
+			return "invalid message payload", "", "", 0
 		}
-		return payload.Text
+		return payload.Text, "", "", 0
 	case models.QueueItemTypePause:
 		var payload models.PausePayload
 		if err := json.Unmarshal(item.Payload, &payload); err != nil {
-			return "invalid pause payload"
+			return "invalid pause payload", "", "", 0
 		}
-		label := fmt.Sprintf("Pause %ds", payload.DurationSeconds)
-		if strings.TrimSpace(payload.Reason) != "" {
-			label += " - " + strings.TrimSpace(payload.Reason)
-		}
-		return label
+		return strings.TrimSpace(payload.Reason), "", "", payload.DurationSeconds
 	case models.QueueItemTypeConditional:
 		var payload models.ConditionalPayload
 		if err := json.Unmarshal(item.Payload, &payload); err != nil {
-			return "invalid conditional payload"
+			return "invalid conditional payload", "", "", 0
 		}
-		prefix := ""
-		switch payload.ConditionType {
-		case models.ConditionTypeWhenIdle:
-			prefix = "When idle: "
-		case models.ConditionTypeAfterCooldown:
-			prefix = "After cooldown: "
-		case models.ConditionTypeAfterPrevious:
-			prefix = "After previous: "
-		case models.ConditionTypeCustomExpression:
-			expr := strings.TrimSpace(payload.Expression)
-			if expr != "" {
-				prefix = fmt.Sprintf("When %s: ", expr)
-			}
-		}
-		return prefix + payload.Message
+		return payload.Message, payload.ConditionType, strings.TrimSpace(payload.Expression), 0
 	default:
-		return "unknown queue item"
+		return "unknown queue item", "", "", 0
 	}
 }
 
@@ -4296,6 +4795,9 @@ func (m model) lastUpdatedView() string {
 
 func (m model) statusLine() string {
 	if strings.TrimSpace(m.statusMsg) == "" {
+		if m.view == viewAgent && m.selectionActive() {
+			return m.styles.Info.Render(fmt.Sprintf("%d agent(s) selected", m.selectedAgentCount()))
+		}
 		return ""
 	}
 	switch m.statusSeverity {
@@ -4850,16 +5352,38 @@ func (m *model) requestAgentAction(action string, requiresConfirm bool) tea.Cmd 
 	return m.applyAgentAction(action, agent)
 }
 
+func (m *model) requestBulkAgentAction(action string, requiresConfirm bool) tea.Cmd {
+	targets := m.selectedAgentTargets()
+	if len(targets) == 0 {
+		m.setStatus("No agents selected.", statusWarn)
+		return nil
+	}
+	if requiresConfirm {
+		m.openBulkActionConfirm(action, targets)
+		return nil
+	}
+	return m.applyBulkAgentAction(action, targets)
+}
+
 func (m *model) openActionConfirm(action, agent string) {
 	m.actionConfirmOpen = true
 	m.actionConfirmAction = action
 	m.actionConfirmAgent = agent
+	m.actionConfirmTargets = nil
+}
+
+func (m *model) openBulkActionConfirm(action string, targets []string) {
+	m.actionConfirmOpen = true
+	m.actionConfirmAction = action
+	m.actionConfirmAgent = ""
+	m.actionConfirmTargets = append([]string(nil), targets...)
 }
 
 func (m *model) closeActionConfirm() {
 	m.actionConfirmOpen = false
 	m.actionConfirmAction = ""
 	m.actionConfirmAgent = ""
+	m.actionConfirmTargets = nil
 	m.profileSwitchPending = ""
 }
 
@@ -4868,17 +5392,24 @@ func (m *model) updateActionConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y", "Y", "enter":
 		action := m.actionConfirmAction
 		agent := m.actionConfirmAgent
+		targets := m.actionConfirmTargets
 		profile := m.profileSwitchPending
 		m.closeActionConfirm()
 		if action == actionSwitchProfile {
 			return m, m.applyProfileSwitch(agent, profile)
 		}
+		if len(targets) > 0 {
+			return m, m.applyBulkAgentAction(action, targets)
+		}
 		return m, m.applyAgentAction(action, agent)
 	case "n", "N", "esc":
 		label := actionLabel(m.actionConfirmAction)
 		agent := m.actionConfirmAgent
+		targets := m.actionConfirmTargets
 		m.closeActionConfirm()
-		if label != "" && agent != "" {
+		if label != "" && len(targets) > 0 {
+			m.setStatus(fmt.Sprintf("%s canceled for %d agents.", label, len(targets)), statusInfo)
+		} else if label != "" && agent != "" {
 			m.setStatus(fmt.Sprintf("%s canceled for %s.", label, agent), statusInfo)
 		} else {
 			m.setStatus("Action canceled.", statusInfo)
@@ -4899,12 +5430,58 @@ func (m *model) applyAgentAction(action, agent string) tea.Cmd {
 		m.setStatus(fmt.Sprintf("%s requested for %s (preview).", label, agent), statusInfo)
 	case actionRestart:
 		m.setStatus(fmt.Sprintf("%s requested for %s (preview).", label, agent), statusInfo)
+	case actionTerminate:
+		m.setStatus(fmt.Sprintf("%s requested for %s (preview).", label, agent), statusInfo)
 	case actionExportLogs:
 		m.setStatus(fmt.Sprintf("Exporting logs for %s (preview).", agent), statusInfo)
 	default:
 		m.setStatus(fmt.Sprintf("Action %s sent for %s (preview).", label, agent), statusInfo)
 	}
 	return actionCompleteCmd(action, agent)
+}
+
+func (m *model) applyBulkAgentAction(action string, agents []string) tea.Cmd {
+	if len(agents) == 0 {
+		m.setStatus("No agents selected.", statusWarn)
+		return nil
+	}
+	label := actionLabel(action)
+	if label == "" {
+		label = "Action"
+	}
+	m.actionInFlightAction = action
+	m.actionInFlightAgent = fmt.Sprintf("%d agents", len(agents))
+	m.setStatus(fmt.Sprintf("%s requested for %d agents (preview).", label, len(agents)), statusInfo)
+	cmds := make([]tea.Cmd, 0, len(agents))
+	for _, agent := range agents {
+		cmds = append(cmds, actionCompleteCmd(action, agent))
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m *model) openBulkQueueEditor() {
+	targets := m.selectedAgentTargets()
+	if len(targets) == 0 {
+		m.setStatus("No agents selected.", statusWarn)
+		return
+	}
+	m.queueEditorBulkTargets = targets
+	m.queueEditorOpen = true
+}
+
+func (m *model) openBulkQueueAdd(kind models.QueueItemType, conditionType models.ConditionType) {
+	targets := m.selectedAgentTargets()
+	if len(targets) == 0 {
+		m.setStatus("No agents selected.", statusWarn)
+		return
+	}
+	m.queueEditBulkTargets = append([]string(nil), targets...)
+	state := m.ensureQueueEditorState(targets[0])
+	if state == nil {
+		m.setStatus("Queue unavailable.", statusWarn)
+		return
+	}
+	m.openQueueAdd(targets[0], state, kind, conditionType, true)
 }
 
 func (m *model) applyProfileSwitch(agent, profile string) tea.Cmd {
@@ -5020,75 +5597,128 @@ func (m *model) approvalsForSelectedWorkspace() ([]approvalItem, string) {
 }
 
 func (m *model) updateQueueEditor(msg tea.KeyMsg) (bool, tea.Cmd) {
-	if msg.String() == "esc" {
-		m.queueEditorOpen = false
-		m.closeQueueEdit()
-		return true, nil
-	}
-
 	state, agent := m.currentQueueEditorState()
 	switch msg.String() {
+	case "esc":
+		if state != nil && state.DeleteConfirm {
+			m.clearQueueDeleteConfirm(state)
+			return true, nil
+		}
+		m.queueEditorOpen = false
+		m.closeQueueEdit()
+		if state != nil {
+			m.clearQueueDeleteConfirm(state)
+		}
+		return true, nil
 	case "up", "k":
 		if state != nil {
 			m.moveQueueSelection(state, -1)
+			m.clearQueueDeleteConfirm(state)
 		}
 		return true, nil
 	case "down", "j":
 		if state != nil {
 			m.moveQueueSelection(state, 1)
+			m.clearQueueDeleteConfirm(state)
 		}
 		return true, nil
 	case "K":
 		if state != nil {
 			m.moveQueueItem(state, -1)
+			m.clearQueueDeleteConfirm(state)
 		}
 		return true, nil
 	case "J":
 		if state != nil {
 			m.moveQueueItem(state, 1)
+			m.clearQueueDeleteConfirm(state)
 		}
 		return true, nil
 	case "ctrl+up", "ctrl+left":
 		if state != nil {
 			m.moveQueueItem(state, -1)
+			m.clearQueueDeleteConfirm(state)
 		}
 		return true, nil
 	case "ctrl+down", "ctrl+right":
 		if state != nil {
 			m.moveQueueItem(state, 1)
+			m.clearQueueDeleteConfirm(state)
 		}
 		return true, nil
 	case "d":
 		if state != nil {
-			m.deleteQueueItem(state)
+			if state.DeleteConfirm && state.DeleteIndex == state.Selected {
+				m.deleteQueueItem(state)
+			} else {
+				state.DeleteConfirm = true
+				state.DeleteIndex = state.Selected
+				m.setStatus("Press d again to confirm delete.", statusWarn)
+			}
 		} else {
 			m.setStatus("No agent selected.", statusWarn)
 		}
 		return true, nil
-	case "m":
+	case "i":
 		if state != nil {
-			m.addQueueItem(state, models.QueueItemTypeMessage, "New message")
+			m.openQueueAdd(agent, state, models.QueueItemTypeMessage, "", true)
+			m.clearQueueDeleteConfirm(state)
 		} else {
 			m.setStatus("No agent selected.", statusWarn)
 		}
 		return true, nil
 	case "p":
 		if state != nil {
-			m.openQueueAdd(agent, state, models.QueueItemTypePause, "Pause duration (e.g., 5m)", "5m")
+			m.openQueueAdd(agent, state, models.QueueItemTypePause, "", true)
+			m.clearQueueDeleteConfirm(state)
 		} else {
 			m.setStatus("No agent selected.", statusWarn)
 		}
 		return true, nil
-	case "c":
+	case "g":
 		if state != nil {
-			m.openQueueAdd(agent, state, models.QueueItemTypeConditional, "Condition (e.g., after_cooldown)", "after_cooldown")
+			m.openQueueAdd(agent, state, models.QueueItemTypeConditional, models.ConditionTypeWhenIdle, true)
+			m.clearQueueDeleteConfirm(state)
+		} else {
+			m.setStatus("No agent selected.", statusWarn)
+		}
+		return true, nil
+	case "t":
+		if state != nil {
+			m.openMessagePalette()
+			m.clearQueueDeleteConfirm(state)
+		} else {
+			m.setStatus("No agent selected.", statusWarn)
+		}
+		return true, nil
+	case "enter":
+		if state != nil {
+			m.openQueueEdit(state, agent)
+			m.clearQueueDeleteConfirm(state)
 		} else {
 			m.setStatus("No agent selected.", statusWarn)
 		}
 		return true, nil
 	case "e":
 		if state != nil {
-			m.openQueueEdit(state, agent)
+			m.toggleQueueItemExpanded(state)
+			m.clearQueueDeleteConfirm(state)
+		} else {
+			m.setStatus("No agent selected.", statusWarn)
+		}
+		return true, nil
+	case "r":
+		if state != nil {
+			m.retryQueueItem(state)
+			m.clearQueueDeleteConfirm(state)
+		} else {
+			m.setStatus("No agent selected.", statusWarn)
+		}
+		return true, nil
+	case "c":
+		if state != nil {
+			m.copyQueueItem(state)
+			m.clearQueueDeleteConfirm(state)
 		} else {
 			m.setStatus("No agent selected.", statusWarn)
 		}
@@ -5137,8 +5767,17 @@ func (m *model) ensureQueueEditorState(agent string) *queueEditorState {
 	}
 	state, ok := m.queueEditors[agent]
 	if !ok {
-		state = &queueEditorState{}
+		state = &queueEditorState{
+			Expanded:    make(map[string]bool),
+			DeleteIndex: -1,
+		}
 		m.queueEditors[agent] = state
+	}
+	if state.Expanded == nil {
+		state.Expanded = make(map[string]bool)
+	}
+	if !state.DeleteConfirm && state.DeleteIndex == 0 {
+		state.DeleteIndex = -1
 	}
 	return state
 }
@@ -5151,16 +5790,23 @@ func (m *model) openQueueEdit(state *queueEditorState, agent string) {
 	if state.Selected < 0 || state.Selected >= len(state.Items) {
 		state.Selected = 0
 	}
+	item := state.Items[state.Selected]
 	m.queueEditOpen = true
 	m.queueEditAgent = agent
 	m.queueEditIndex = state.Selected
-	m.queueEditBuffer = state.Items[state.Selected].Summary
+	if item.Kind == models.QueueItemTypePause {
+		m.queueEditBuffer = formatDurationLabel(item.DurationSeconds)
+	} else {
+		m.queueEditBuffer = item.Summary
+	}
 	m.queueEditMode = queueEditModeEdit
-	m.queueEditKind = state.Items[state.Selected].Kind
-	m.queueEditPrompt = "Item summary"
+	m.queueEditKind = item.Kind
+	m.queueEditCondition = item.ConditionType
+	m.queueEditConditionExpr = item.ConditionExpr
+	m.queueEditPrompt = queueEditPromptForItem(item)
 }
 
-func (m *model) openQueueAdd(agent string, state *queueEditorState, kind models.QueueItemType, prompt string, placeholder string) {
+func (m *model) openQueueAdd(agent string, state *queueEditorState, kind models.QueueItemType, conditionType models.ConditionType, insertAtCursor bool) {
 	if strings.TrimSpace(agent) == "" {
 		m.setStatus("No agent selected.", statusWarn)
 		return
@@ -5170,9 +5816,29 @@ func (m *model) openQueueAdd(agent string, state *queueEditorState, kind models.
 		if state.Selected < 0 || state.Selected >= len(state.Items) {
 			state.Selected = 0
 		}
-		insertIndex = state.Selected + 1
+		if insertAtCursor {
+			insertIndex = state.Selected
+		} else {
+			insertIndex = state.Selected + 1
+		}
 		if insertIndex > len(state.Items) {
 			insertIndex = len(state.Items)
+		}
+	}
+	placeholder := ""
+	switch kind {
+	case models.QueueItemTypeMessage:
+		placeholder = "New message"
+	case models.QueueItemTypePause:
+		placeholder = "5m"
+	case models.QueueItemTypeConditional:
+		switch conditionType {
+		case models.ConditionTypeWhenIdle:
+			placeholder = "Continue when idle"
+		case models.ConditionTypeAfterCooldown:
+			placeholder = "Continue after cooldown"
+		default:
+			placeholder = "Continue when ready"
 		}
 	}
 	m.queueEditOpen = true
@@ -5181,7 +5847,9 @@ func (m *model) openQueueAdd(agent string, state *queueEditorState, kind models.
 	m.queueEditBuffer = placeholder
 	m.queueEditMode = queueEditModeAdd
 	m.queueEditKind = kind
-	m.queueEditPrompt = prompt
+	m.queueEditCondition = conditionType
+	m.queueEditConditionExpr = ""
+	m.queueEditPrompt = queueEditPromptForItem(queueItem{Kind: kind, ConditionType: conditionType})
 }
 
 func (m *model) closeQueueEdit() {
@@ -5191,6 +5859,8 @@ func (m *model) closeQueueEdit() {
 	m.queueEditBuffer = ""
 	m.queueEditMode = queueEditModeEdit
 	m.queueEditKind = ""
+	m.queueEditCondition = ""
+	m.queueEditConditionExpr = ""
 	m.queueEditPrompt = ""
 }
 
@@ -5213,18 +5883,28 @@ func (m *model) applyQueueEdit() {
 		return
 	}
 	if m.queueEditMode == queueEditModeAdd {
-		summary := text
+		item := queueItem{
+			ID:            nextQueueItemID(state),
+			Kind:          m.queueEditKind,
+			Status:        models.QueueItemStatusPending,
+			ConditionType: m.queueEditCondition,
+			ConditionExpr: m.queueEditConditionExpr,
+		}
 		switch m.queueEditKind {
 		case models.QueueItemTypePause:
-			summary = fmt.Sprintf("Pause %s", text)
+			durationSeconds, err := parseQueueDurationSeconds(text)
+			if err != nil {
+				m.setStatus(err.Error(), statusWarn)
+				return
+			}
+			item.DurationSeconds = durationSeconds
 		case models.QueueItemTypeConditional:
-			summary = fmt.Sprintf("Wait until %s", text)
-		}
-		item := queueItem{
-			ID:      nextQueueItemID(state),
-			Kind:    m.queueEditKind,
-			Summary: summary,
-			Status:  models.QueueItemStatusPending,
+			item.Summary = text
+			if item.ConditionType == "" {
+				item.ConditionType = models.ConditionTypeWhenIdle
+			}
+		default:
+			item.Summary = text
 		}
 		insertIndex := clampInt(m.queueEditIndex, 0, len(state.Items))
 		state.Items = append(state.Items, queueItem{})
@@ -5235,7 +5915,22 @@ func (m *model) applyQueueEdit() {
 		m.setStatus("Queue item added.", statusInfo)
 		return
 	}
-	state.Items[m.queueEditIndex].Summary = text
+	item := &state.Items[m.queueEditIndex]
+	switch item.Kind {
+	case models.QueueItemTypePause:
+		durationSeconds, err := parseQueueDurationSeconds(text)
+		if err != nil {
+			m.setStatus(err.Error(), statusWarn)
+			return
+		}
+		item.DurationSeconds = durationSeconds
+	case models.QueueItemTypeConditional:
+		item.Summary = text
+		item.ConditionType = m.queueEditCondition
+		item.ConditionExpr = m.queueEditConditionExpr
+	default:
+		item.Summary = text
+	}
 	m.closeQueueEdit()
 	m.setStatus("Queue item updated.", statusInfo)
 }
@@ -5269,13 +5964,77 @@ func (m *model) deleteQueueItem(state *queueEditorState) {
 		return
 	}
 	index := state.Selected
+	removedID := state.Items[index].ID
 	state.Items = append(state.Items[:index], state.Items[index+1:]...)
 	if len(state.Items) == 0 {
 		state.Selected = 0
 	} else if index >= len(state.Items) {
 		state.Selected = len(state.Items) - 1
 	}
+	if state.Expanded != nil && strings.TrimSpace(removedID) != "" {
+		delete(state.Expanded, removedID)
+	}
+	m.clearQueueDeleteConfirm(state)
 	m.setStatus("Queue item deleted.", statusInfo)
+}
+
+func (m *model) toggleQueueItemExpanded(state *queueEditorState) {
+	if state == nil || len(state.Items) == 0 {
+		return
+	}
+	if state.Expanded == nil {
+		state.Expanded = make(map[string]bool)
+	}
+	item := state.Items[state.Selected]
+	if strings.TrimSpace(item.ID) == "" {
+		return
+	}
+	if state.Expanded[item.ID] {
+		delete(state.Expanded, item.ID)
+	} else {
+		state.Expanded[item.ID] = true
+	}
+}
+
+func (m *model) retryQueueItem(state *queueEditorState) {
+	if state == nil || len(state.Items) == 0 {
+		return
+	}
+	item := &state.Items[state.Selected]
+	if item.Status != models.QueueItemStatusFailed {
+		return
+	}
+	item.Status = models.QueueItemStatusPending
+	item.Attempts = 0
+	item.Error = ""
+	m.setStatus("Queue item reset to pending.", statusInfo)
+}
+
+func (m *model) copyQueueItem(state *queueEditorState) {
+	if state == nil || len(state.Items) == 0 {
+		return
+	}
+	index := state.Selected
+	original := state.Items[index]
+	clone := original
+	clone.ID = nextQueueItemID(state)
+	clone.Status = models.QueueItemStatusPending
+	clone.Attempts = 0
+	clone.Error = ""
+	insertIndex := clampInt(index+1, 0, len(state.Items))
+	state.Items = append(state.Items, queueItem{})
+	copy(state.Items[insertIndex+1:], state.Items[insertIndex:])
+	state.Items[insertIndex] = clone
+	state.Selected = insertIndex
+	m.setStatus("Queue item copied.", statusInfo)
+}
+
+func (m *model) clearQueueDeleteConfirm(state *queueEditorState) {
+	if state == nil {
+		return
+	}
+	state.DeleteConfirm = false
+	state.DeleteIndex = -1
 }
 
 func (m *model) addQueueItem(state *queueEditorState, kind models.QueueItemType, summary string) {
@@ -5481,6 +6240,7 @@ func (m model) actionConfirmLine() string {
 	}
 	label := actionLabel(m.actionConfirmAction)
 	agent := m.actionConfirmAgent
+	targetCount := len(m.actionConfirmTargets)
 	if label == "" {
 		label = "Action"
 	}
@@ -5493,6 +6253,9 @@ func (m model) actionConfirmLine() string {
 			profile = "profile"
 		}
 		return m.styles.Warning.Render(fmt.Sprintf("Confirm switch to %s for %s? (y/n)", profile, agent))
+	}
+	if targetCount > 0 {
+		return m.styles.Warning.Render(fmt.Sprintf("Confirm %s for %d agents? (y/n)", strings.ToLower(label), targetCount))
 	}
 	return m.styles.Warning.Render(fmt.Sprintf("Confirm %s for %s? (y/n)", strings.ToLower(label), agent))
 }
@@ -5524,6 +6287,8 @@ func actionLabel(action string) string {
 		return "Pause"
 	case actionResume:
 		return "Resume"
+	case actionTerminate:
+		return "Terminate"
 	case actionSwitchProfile:
 		return "Switch profile"
 	case actionView:
