@@ -90,6 +90,10 @@ func OpenInMemory() (*DB, error) {
 		return nil, fmt.Errorf("failed to open in-memory database: %w", err)
 	}
 
+	// Keep a single connection open so the in-memory DB stays consistent.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	return &DB{
 		DB:     db,
 		logger: logging.Component("db"),
