@@ -85,7 +85,7 @@ var nodeListCmd = &cobra.Command{
 		defer database.Close()
 
 		repo := db.NewNodeRepository(database)
-		service := node.NewService(repo)
+		service := node.NewService(repo, node.WithPublisher(newEventPublisher(database)))
 
 		var status *models.NodeStatus
 		if nodeStatus != "" {
@@ -159,7 +159,7 @@ By default, the connection is tested before adding. Use --no-test to skip.`,
 		defer database.Close()
 
 		repo := db.NewNodeRepository(database)
-		service := node.NewService(repo)
+		service := node.NewService(repo, node.WithPublisher(newEventPublisher(database)))
 
 		n := &models.Node{
 			Name:       nodeAddName,
@@ -219,7 +219,7 @@ This does not stop agents running on the node.`,
 		defer database.Close()
 
 		repo := db.NewNodeRepository(database)
-		service := node.NewService(repo)
+		service := node.NewService(repo, node.WithPublisher(newEventPublisher(database)))
 
 		n, err := findNode(ctx, service, nameOrID)
 		if err != nil {
@@ -280,7 +280,7 @@ For local nodes, uses the local package manager.`,
 		defer database.Close()
 
 		repo := db.NewNodeRepository(database)
-		service := node.NewService(repo)
+		service := node.NewService(repo, node.WithPublisher(newEventPublisher(database)))
 
 		n, err := findNode(ctx, service, nameOrID)
 		if err != nil {
@@ -363,7 +363,7 @@ Checks include:
 		defer database.Close()
 
 		repo := db.NewNodeRepository(database)
-		service := node.NewService(repo)
+		service := node.NewService(repo, node.WithPublisher(newEventPublisher(database)))
 
 		n, err := findNode(ctx, service, nameOrID)
 		if err != nil {
@@ -437,7 +437,7 @@ If no node is specified, refreshes all nodes.`,
 		defer database.Close()
 
 		repo := db.NewNodeRepository(database)
-		service := node.NewService(repo)
+		service := node.NewService(repo, node.WithPublisher(newEventPublisher(database)))
 
 		var nodesToRefresh []*models.Node
 
@@ -574,7 +574,7 @@ The command must be specified after the -- separator.`,
 		defer database.Close()
 
 		repo := db.NewNodeRepository(database)
-		service := node.NewService(repo)
+		service := node.NewService(repo, node.WithPublisher(newEventPublisher(database)))
 
 		n, err := findNode(ctx, service, nameOrID)
 		if err != nil {

@@ -147,11 +147,11 @@ If --workspace is not specified, the workspace is resolved from:
 
 		// Create services
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		tmuxClient := tmux.NewLocalClient()
 		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
@@ -282,11 +282,11 @@ Use --workspace="" to list all agents across workspaces.`,
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		tmuxClient := tmux.NewLocalClient()
 		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
@@ -369,11 +369,11 @@ var agentStatusCmd = &cobra.Command{
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		tmuxClient := tmux.NewLocalClient()
 		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
@@ -460,11 +460,11 @@ var agentTerminateCmd = &cobra.Command{
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		tmuxClient := tmux.NewLocalClient()
 		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
@@ -519,11 +519,11 @@ var agentInterruptCmd = &cobra.Command{
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		tmuxClient := tmux.NewLocalClient()
 		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
@@ -573,11 +573,11 @@ var agentPauseCmd = &cobra.Command{
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		tmuxClient := tmux.NewLocalClient()
 		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
@@ -626,11 +626,11 @@ var agentResumeCmd = &cobra.Command{
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		tmuxClient := tmux.NewLocalClient()
 		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
@@ -740,11 +740,11 @@ var agentRestartCmd = &cobra.Command{
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		tmuxClient := tmux.NewLocalClient()
 		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)

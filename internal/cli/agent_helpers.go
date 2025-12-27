@@ -14,6 +14,9 @@ func agentServiceOptions(database *db.DB) []agent.ServiceOption {
 	if database != nil {
 		opts = append(opts, agent.WithEventRepository(db.NewEventRepository(database)))
 	}
+	if publisher := newEventPublisher(database); publisher != nil {
+		opts = append(opts, agent.WithPublisher(publisher))
+	}
 
 	if cfg := GetConfig(); cfg != nil {
 		archiveDir := filepath.Join(cfg.Global.DataDir, "archives", "agents")

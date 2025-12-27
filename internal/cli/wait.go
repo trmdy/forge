@@ -146,12 +146,12 @@ Exit codes:
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
 		accountRepo := db.NewAccountRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 		_ = wsService
 
 		startTime := time.Now()

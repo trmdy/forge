@@ -283,7 +283,7 @@ func registerLocalNode() initResult {
 	defer database.Close()
 
 	repo := db.NewNodeRepository(database)
-	service := node.NewService(repo)
+	service := node.NewService(repo, node.WithPublisher(newEventPublisher(database)))
 
 	// Check if a local node already exists
 	nodes, err := service.ListNodes(ctx, nil)

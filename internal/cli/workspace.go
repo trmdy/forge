@@ -122,11 +122,11 @@ By default, a tmux session is created in the repository directory.`,
 
 		// Resolve services
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		eventRepo := db.NewEventRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithEventRepository(eventRepo))
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithEventRepository(eventRepo), workspace.WithPublisher(newEventPublisher(database)))
 
 		// Resolve node ID if name provided
 		nodeID := ""
@@ -198,11 +198,11 @@ This allows Swarm to manage agents in sessions created outside of Swarm.`,
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		eventRepo := db.NewEventRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithEventRepository(eventRepo))
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithEventRepository(eventRepo), workspace.WithPublisher(newEventPublisher(database)))
 
 		// Resolve node
 		n, err := findNode(ctx, nodeService, wsImportNode)
@@ -279,10 +279,10 @@ var wsListCmd = &cobra.Command{
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		// Build options
 		opts := workspace.ListWorkspacesOptions{
@@ -364,10 +364,10 @@ var wsStatusCmd = &cobra.Command{
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		// Find workspace
 		ws, err := findWorkspace(ctx, wsRepo, idOrName)
@@ -542,10 +542,10 @@ var wsAttachCmd = &cobra.Command{
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		// Find workspace
 		ws, err := findWorkspace(ctx, wsRepo, idOrName)
@@ -598,10 +598,10 @@ Use --destroy to also kill the tmux session.`,
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		// Find workspace
 		ws, err := findWorkspace(ctx, wsRepo, idOrName)
@@ -676,11 +676,11 @@ and removing the Swarm record.`,
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		tmuxClient := tmux.NewLocalClient()
 		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
@@ -747,10 +747,10 @@ var wsRefreshCmd = &cobra.Command{
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		var workspaces []*models.Workspace
 

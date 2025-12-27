@@ -27,8 +27,8 @@ func TestSkipConfirmation(t *testing.T) {
 		want           bool
 	}{
 		{
-			name:    "all defaults",
-			want:    true, // no TTY in test environment
+			name: "all defaults",
+			want: true, // no TTY in test environment
 		},
 		{
 			name:    "yes flag set",

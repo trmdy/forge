@@ -87,10 +87,10 @@ func maybeAutoImportWorkspaces(ctx context.Context) {
 	defer database.Close()
 
 	nodeRepo := db.NewNodeRepository(database)
-	nodeService := node.NewService(nodeRepo)
+	nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 	wsRepo := db.NewWorkspaceRepository(database)
 	agentRepo := db.NewAgentRepository(database)
-	wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+	wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 	report, err := wsService.RecoverOrphanedSessions(ctx, "", appConfig.WorkspaceDefaults.TmuxPrefix)
 	if err != nil {
@@ -124,7 +124,7 @@ func maybeAutoRegisterLocalNode(ctx context.Context) {
 	defer database.Close()
 
 	nodeRepo := db.NewNodeRepository(database)
-	nodeService := node.NewService(nodeRepo)
+	nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 
 	// Check if a local node already exists
 	nodes, err := nodeService.ListNodes(ctx, nil)

@@ -355,7 +355,7 @@ func checkNodes(ctx context.Context, database *db.DB) []DoctorCheck {
 	checks := make([]DoctorCheck, 0)
 
 	nodeRepo := db.NewNodeRepository(database)
-	nodeService := node.NewService(nodeRepo)
+	nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 
 	nodes, err := nodeRepo.List(ctx, nil)
 	if err != nil {

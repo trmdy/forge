@@ -96,7 +96,7 @@ func listNodeCompletions() ([]string, error) {
 	defer database.Close()
 
 	repo := db.NewNodeRepository(database)
-	service := node.NewService(repo)
+	service := node.NewService(repo, node.WithPublisher(newEventPublisher(database)))
 
 	nodes, err := service.ListNodes(context.Background(), nil)
 	if err != nil {

@@ -114,7 +114,7 @@ func runVaultSync(nodeName string, direction vaultSyncDirection) error {
 	defer database.Close()
 
 	repo := db.NewNodeRepository(database)
-	service := node.NewService(repo)
+	service := node.NewService(repo, node.WithPublisher(newEventPublisher(database)))
 
 	n, err := findNode(ctx, service, nodeName)
 	if err != nil {

@@ -81,12 +81,12 @@ spawns one or more agents. This is the fastest way to get started.`,
 
 		// Set up services
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
 		eventRepo := db.NewEventRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithEventRepository(eventRepo))
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithEventRepository(eventRepo), workspace.WithPublisher(newEventPublisher(database)))
 		tmuxClient := tmux.NewLocalClient()
 		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
 

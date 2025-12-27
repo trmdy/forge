@@ -729,8 +729,8 @@ var accountsRotateCmd = &cobra.Command{
 		wsRepo := db.NewWorkspaceRepository(database)
 		queueRepo := db.NewQueueRepository(database)
 
-		nodeService := node.NewService(nodeRepo)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		agentInfo, err := findAgent(ctx, agentRepo, args[0])
 		if err != nil {
@@ -751,7 +751,7 @@ var accountsRotateCmd = &cobra.Command{
 			return err
 		}
 
-		accountService, err := buildAccountService(ctx, accountRepo, rotationMode)
+		accountService, err := buildAccountService(ctx, accountRepo, rotationMode, database)
 		if err != nil {
 			return err
 		}
@@ -969,7 +969,7 @@ func accountIDForMode(account *models.Account, mode accountIDMode) string {
 	return account.ProfileName
 }
 
-func buildAccountService(ctx context.Context, repo *db.AccountRepository, mode accountIDMode) (*account.Service, error) {
+func buildAccountService(ctx context.Context, repo *db.AccountRepository, mode accountIDMode, database *db.DB) (*account.Service, error) {
 	cfg := GetConfig()
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -977,7 +977,7 @@ func buildAccountService(ctx context.Context, repo *db.AccountRepository, mode a
 	cfgCopy := *cfg
 	cfgCopy.Accounts = nil
 
-	svc := account.NewService(&cfgCopy, account.WithRepository(repo))
+	svc := account.NewService(&cfgCopy, account.WithRepository(repo), account.WithPublisher(newEventPublisher(database)))
 
 	accounts, err := repo.List(ctx, nil)
 	if err != nil {

@@ -69,7 +69,7 @@ This is a convenience wrapper around port forwarding using the swarmd defaults.`
 		defer database.Close()
 
 		repo := db.NewNodeRepository(database)
-		service := node.NewService(repo)
+		service := node.NewService(repo, node.WithPublisher(newEventPublisher(database)))
 
 		n, err := findNode(ctx, service, nameOrID)
 		if err != nil {

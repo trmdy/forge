@@ -96,11 +96,11 @@ If no agent is specified, uses the agent from current context.`,
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 		_ = wsService // for future use with --all
 
 		queueService := queue.NewService(queueRepo)
@@ -388,11 +388,11 @@ func writeQueueResults(message string, results []sendResult, opts queueOptions) 
 
 func sendImmediateMessages(ctx context.Context, database *db.DB, agents []*models.Agent, message string, skipIdle bool) error {
 	nodeRepo := db.NewNodeRepository(database)
-	nodeService := node.NewService(nodeRepo)
+	nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 	wsRepo := db.NewWorkspaceRepository(database)
 	agentRepo := db.NewAgentRepository(database)
 	queueRepo := db.NewQueueRepository(database)
-	wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+	wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 	tmuxClient := tmux.NewLocalClient()
 	agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)

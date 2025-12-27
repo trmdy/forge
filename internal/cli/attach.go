@@ -57,10 +57,10 @@ If no target is specified:
 		defer database.Close()
 
 		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo)
+		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
 		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo)
+		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
 
 		var target string
 		if len(args) > 0 {
