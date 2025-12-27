@@ -7,6 +7,11 @@ import (
 )
 
 func TestLoadDefault(t *testing.T) {
+	// Use a temp directory as HOME to avoid picking up existing config files
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
+
 	cfg, err := LoadDefault()
 	if err != nil {
 		t.Fatalf("LoadDefault() error = %v", err)
@@ -25,8 +30,8 @@ func TestLoadDefault(t *testing.T) {
 		t.Errorf("Expected database.max_connections = 10, got %d", cfg.Database.MaxConnections)
 	}
 
-	if cfg.WorkspaceDefaults.TmuxPrefix != "swarm" {
-		t.Errorf("Expected workspace_defaults.tmux_prefix = 'swarm', got %q", cfg.WorkspaceDefaults.TmuxPrefix)
+	if cfg.WorkspaceDefaults.TmuxPrefix != "forge" {
+		t.Errorf("Expected workspace_defaults.tmux_prefix = 'forge', got %q", cfg.WorkspaceDefaults.TmuxPrefix)
 	}
 }
 
@@ -65,15 +70,15 @@ database:
 	}
 
 	// Check defaults are still applied
-	if cfg.WorkspaceDefaults.TmuxPrefix != "swarm" {
-		t.Errorf("Expected workspace_defaults.tmux_prefix = 'swarm', got %q", cfg.WorkspaceDefaults.TmuxPrefix)
+	if cfg.WorkspaceDefaults.TmuxPrefix != "forge" {
+		t.Errorf("Expected workspace_defaults.tmux_prefix = 'forge', got %q", cfg.WorkspaceDefaults.TmuxPrefix)
 	}
 }
 
 func TestEnvironmentOverride(t *testing.T) {
-	// Set env var
-	t.Setenv("SWARM_LOGGING_LEVEL", "warn")
-	t.Setenv("SWARM_DATABASE_MAX_CONNECTIONS", "5")
+	// Set env var (FORGE_ is the primary prefix, SWARM_ is deprecated fallback)
+	t.Setenv("FORGE_LOGGING_LEVEL", "warn")
+	t.Setenv("FORGE_DATABASE_MAX_CONNECTIONS", "5")
 
 	loader := NewLoader()
 	cfg, err := loader.Load()
@@ -136,7 +141,7 @@ func TestDatabasePath(t *testing.T) {
 	cfg := DefaultConfig()
 
 	// Default should use DataDir
-	expectedPath := filepath.Join(cfg.Global.DataDir, "swarm.db")
+	expectedPath := filepath.Join(cfg.Global.DataDir, "forge.db")
 	if cfg.DatabasePath() != expectedPath {
 		t.Errorf("DatabasePath() = %q, want %q", cfg.DatabasePath(), expectedPath)
 	}

@@ -1,4 +1,4 @@
-// Package tui implements the Swarm terminal user interface.
+// Package tui implements the Forge terminal user interface.
 package tui
 
 import (
@@ -865,7 +865,7 @@ func (m model) View() string {
 	}
 
 	lines := []string{
-		m.styles.Title.Render("Swarm TUI (preview)"),
+		m.styles.Title.Render("Forge TUI (preview)"),
 		m.breadcrumbLine(),
 		m.navLine(),
 	}

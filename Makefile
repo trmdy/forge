@@ -1,4 +1,4 @@
-# Swarm Makefile
+# Forge Makefile
 # Control plane for AI coding agents
 
 # Build variables
@@ -16,15 +16,15 @@ GOFMT := gofmt
 GOMOD := $(GOCMD) mod
 
 # Binary names
-BINARY_CLI := swarm
-BINARY_DAEMON := swarmd
-BINARY_RUNNER := swarm-agent-runner
+BINARY_CLI := forge
+BINARY_DAEMON := forged
+BINARY_RUNNER := forge-agent-runner
 
 # Directories
 BUILD_DIR := ./build
-CMD_CLI := ./cmd/swarm
-CMD_DAEMON := ./cmd/swarmd
-CMD_RUNNER := ./cmd/swarm-agent-runner
+CMD_CLI := ./cmd/forge
+CMD_DAEMON := ./cmd/forged
+CMD_RUNNER := ./cmd/forge-agent-runner
 
 # Installation directories
 PREFIX ?= /usr/local
@@ -224,7 +224,7 @@ migrate-down:
 
 # Show help
 help:
-	@echo "Swarm - Control plane for AI coding agents"
+	@echo "Forge - Control plane for AI coding agents"
 	@echo ""
 	@echo "Usage:"
 	@echo "  make [target]"

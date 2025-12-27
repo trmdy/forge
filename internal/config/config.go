@@ -1,4 +1,4 @@
-// Package config handles Swarm configuration loading and validation.
+// Package config handles Forge configuration loading and validation.
 package config
 
 import (
@@ -11,7 +11,7 @@ import (
 	"github.com/opencode-ai/swarm/internal/models"
 )
 
-// Config is the root configuration structure for Swarm.
+// Config is the root configuration structure for Forge.
 type Config struct {
 	// Global settings
 	Global GlobalConfig `yaml:"global" mapstructure:"global"`
@@ -47,12 +47,12 @@ type Config struct {
 	EventRetention EventRetentionConfig `yaml:"event_retention" mapstructure:"event_retention"`
 }
 
-// GlobalConfig contains global Swarm settings.
+// GlobalConfig contains global Forge settings.
 type GlobalConfig struct {
-	// DataDir is where Swarm stores its data (default: ~/.local/share/swarm).
+	// DataDir is where Forge stores its data (default: ~/.local/share/forge).
 	DataDir string `yaml:"data_dir" mapstructure:"data_dir"`
 
-	// ConfigDir is where config files are stored (default: ~/.config/swarm).
+	// ConfigDir is where config files are stored (default: ~/.config/forge).
 	ConfigDir string `yaml:"config_dir" mapstructure:"config_dir"`
 
 	// AutoRegisterLocalNode automatically registers the local machine as a node.
@@ -241,12 +241,12 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		Global: GlobalConfig{
-			DataDir:               filepath.Join(homeDir, ".local", "share", "swarm"),
-			ConfigDir:             filepath.Join(homeDir, ".config", "swarm"),
+			DataDir:               filepath.Join(homeDir, ".local", "share", "forge"),
+			ConfigDir:             filepath.Join(homeDir, ".config", "forge"),
 			AutoRegisterLocalNode: true,
 		},
 		Database: DatabaseConfig{
-			Path:           "", // Will be set to DataDir/swarm.db
+			Path:           "", // Will be set to DataDir/forge.db
 			MaxConnections: 10,
 			BusyTimeoutMs:  5000,
 		},
@@ -262,7 +262,7 @@ func DefaultConfig() *Config {
 			HealthCheckInterval: 60 * time.Second,
 		},
 		WorkspaceDefaults: WorkspaceConfig{
-			TmuxPrefix:         "swarm",
+			TmuxPrefix:         "forge",
 			DefaultAgentType:   models.AgentTypeOpenCode,
 			AutoImportExisting: false,
 		},
@@ -469,7 +469,7 @@ func (c *Config) DatabasePath() string {
 	if c.Database.Path != "" {
 		return c.Database.Path
 	}
-	return filepath.Join(c.Global.DataDir, "swarm.db")
+	return filepath.Join(c.Global.DataDir, "forge.db")
 }
 
 // ArchivePath returns the full archive directory path.

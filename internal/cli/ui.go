@@ -23,8 +23,8 @@ func init() {
 
 var uiCmd = &cobra.Command{
 	Use:   "ui",
-	Short: "Launch the Swarm TUI",
-	Long:  "Launch the Swarm terminal user interface (TUI).",
+	Short: "Launch the Forge TUI",
+	Long:  "Launch the Forge terminal user interface (TUI).",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runTUI()
 	},
@@ -35,7 +35,7 @@ func runTUI() error {
 		return &PreflightError{
 			Message:  "TUI requires an interactive terminal",
 			Hint:     "Run without --non-interactive and with a TTY, or use CLI subcommands",
-			NextStep: "swarm --help",
+			NextStep: "forge --help",
 		}
 	}
 
@@ -82,30 +82,38 @@ func hasTTY() bool {
 
 func agentMailConfigFromEnv() tui.AgentMailConfig {
 	cfg := tui.AgentMailConfig{
-		URL:     strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_URL")),
-		Project: strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_PROJECT")),
-		Agent:   strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_AGENT")),
+		URL:     getEnvWithFallback("FORGE_AGENT_MAIL_URL", "SWARM_AGENT_MAIL_URL"),
+		Project: getEnvWithFallback("FORGE_AGENT_MAIL_PROJECT", "SWARM_AGENT_MAIL_PROJECT"),
+		Agent:   getEnvWithFallback("FORGE_AGENT_MAIL_AGENT", "SWARM_AGENT_MAIL_AGENT"),
 	}
 
-	if value := strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_LIMIT")); value != "" {
+	if value := getEnvWithFallback("FORGE_AGENT_MAIL_LIMIT", "SWARM_AGENT_MAIL_LIMIT"); value != "" {
 		if limit, err := strconv.Atoi(value); err == nil && limit > 0 {
 			cfg.Limit = limit
 		}
 	}
 
-	if value := strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_POLL_INTERVAL")); value != "" {
+	if value := getEnvWithFallback("FORGE_AGENT_MAIL_POLL_INTERVAL", "SWARM_AGENT_MAIL_POLL_INTERVAL"); value != "" {
 		if parsed, ok := parseEnvDuration(value); ok {
 			cfg.PollInterval = parsed
 		}
 	}
 
-	if value := strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_TIMEOUT")); value != "" {
+	if value := getEnvWithFallback("FORGE_AGENT_MAIL_TIMEOUT", "SWARM_AGENT_MAIL_TIMEOUT"); value != "" {
 		if parsed, ok := parseEnvDuration(value); ok {
 			cfg.Timeout = parsed
 		}
 	}
 
 	return cfg
+}
+
+// getEnvWithFallback returns the value of the primary env var, or falls back to legacy.
+func getEnvWithFallback(primary, legacy string) string {
+	if value := strings.TrimSpace(os.Getenv(primary)); value != "" {
+		return value
+	}
+	return strings.TrimSpace(os.Getenv(legacy))
 }
 
 func parseEnvDuration(value string) (time.Duration, bool) {

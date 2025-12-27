@@ -94,23 +94,28 @@ func (l *Loader) setupViper(cfg *Config) {
 	v.SetConfigName("config")
 	v.SetConfigType("yaml")
 
-	// XDG config directories
+	// XDG config directories - check forge first, then swarm for migration
 	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
-		v.AddConfigPath(filepath.Join(xdgConfig, "swarm"))
+		v.AddConfigPath(filepath.Join(xdgConfig, "forge"))
+		v.AddConfigPath(filepath.Join(xdgConfig, "swarm")) // legacy fallback
 	}
 
 	homeDir, _ := os.UserHomeDir()
 	if homeDir != "" {
-		v.AddConfigPath(filepath.Join(homeDir, ".config", "swarm"))
+		v.AddConfigPath(filepath.Join(homeDir, ".config", "forge"))
+		v.AddConfigPath(filepath.Join(homeDir, ".config", "swarm")) // legacy fallback
 	}
 
 	// Current directory
 	v.AddConfigPath(".")
 
-	// Environment variables
-	v.SetEnvPrefix("SWARM")
+	// Environment variables - FORGE_ prefix, with SWARM_ as fallback
+	v.SetEnvPrefix("FORGE")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+
+	// Bind legacy SWARM_* env vars as fallbacks
+	bindLegacyEnvVars(v)
 
 	// Set defaults from config struct
 	l.setDefaults(cfg)
@@ -230,4 +235,27 @@ func MustLoad() *Config {
 		panic(fmt.Sprintf("failed to load config: %v", err))
 	}
 	return cfg
+}
+
+// bindLegacyEnvVars binds SWARM_* environment variables as deprecated fallbacks.
+// This allows users to migrate from swarm to forge gradually.
+func bindLegacyEnvVars(v *viper.Viper) {
+	legacyBindings := map[string]string{
+		"global.data_dir":                       "SWARM_GLOBAL_DATA_DIR",
+		"global.config_dir":                     "SWARM_GLOBAL_CONFIG_DIR",
+		"database.path":                         "SWARM_DATABASE_PATH",
+		"logging.level":                         "SWARM_LOGGING_LEVEL",
+		"logging.format":                        "SWARM_LOGGING_FORMAT",
+		"scheduler.dispatch_interval":           "SWARM_SCHEDULER_DISPATCH_INTERVAL",
+		"scheduler.default_cooldown_duration":   "SWARM_SCHEDULER_DEFAULT_COOLDOWN_DURATION",
+		"agent_defaults.state_polling_interval": "SWARM_AGENT_DEFAULTS_STATE_POLLING_INTERVAL",
+	}
+
+	for key, envVar := range legacyBindings {
+		// Only bind if the FORGE_ equivalent is not set
+		forgeEnvVar := strings.Replace(envVar, "SWARM_", "FORGE_", 1)
+		if os.Getenv(forgeEnvVar) == "" && os.Getenv(envVar) != "" {
+			_ = v.BindEnv(key, envVar)
+		}
+	}
 }

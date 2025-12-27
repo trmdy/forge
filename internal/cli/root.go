@@ -1,4 +1,4 @@
-// Package cli implements the Swarm command-line interface using Cobra.
+// Package cli implements the Forge command-line interface using Cobra.
 package cli
 
 import (
@@ -34,9 +34,9 @@ var (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "swarm",
+	Use:   "forge",
 	Short: "Control plane for AI coding agents",
-	Long: `Swarm is a control plane for running and supervising AI coding agents
+	Long: `Forge is a control plane for running and supervising AI coding agents
 across multiple repositories and servers.
 
 It provides:
@@ -45,7 +45,7 @@ It provides:
   - Deep integration with tmux and SSH
   - Multi-account orchestration with cooldown management
 
-Run 'swarm' without arguments to launch the TUI dashboard.`,
+Run 'forge' without arguments to launch the TUI dashboard.`,
 	// Default action is to launch TUI
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runTUI()
@@ -70,7 +70,7 @@ func init() {
 	}
 
 	// Global flags
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/swarm/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/forge/config.yaml)")
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "output in JSON format")
 	rootCmd.PersistentFlags().BoolVar(&jsonlOutput, "jsonl", false, "output in JSON Lines format (for streaming)")
 	rootCmd.PersistentFlags().BoolVar(&watchMode, "watch", false, "watch for changes and stream updates")

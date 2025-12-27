@@ -1,12 +1,12 @@
 [Unit]
-Description=Swarm node daemon
+Description=Forge node daemon
 After=network.target
 
 [Service]
 Type=simple
-User=swarm
-Group=swarm
-ExecStart=/usr/local/bin/swarmd
+User=forge
+Group=forge
+ExecStart=/usr/local/bin/forged
 Restart=on-failure
 RestartSec=5s
 
