@@ -138,6 +138,21 @@ Notes:
 - `agent send` preserves newlines when using `--file`, `--stdin`, or `--editor`.
 - `agent send --skip-idle-check` bypasses the idle requirement.
 
+### `swarm queue`
+
+Inspect queued messages and dispatch status.
+
+```bash
+swarm queue ls
+swarm queue ls --agent <agent-id>
+swarm queue ls --status pending
+swarm queue ls --all
+```
+
+Notes:
+- Uses workspace context by default; pass `--agent` to scope to one agent.
+- `--status blocked` shows pending items that are blocked by dependencies or agent state.
+
 ### `swarm accounts`
 
 Manage provider accounts and cooldowns.

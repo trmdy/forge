@@ -298,10 +298,10 @@ func (a *Agent) IsActive() bool {
 	}
 }
 
-// IsBlocked returns true if the agent is blocked and needs attention.
+// IsBlocked returns true if the agent is blocked and cannot accept work.
 func (a *Agent) IsBlocked() bool {
 	switch a.State {
-	case AgentStateAwaitingApproval, AgentStateRateLimited, AgentStateError:
+	case AgentStateAwaitingApproval, AgentStateRateLimited, AgentStateError, AgentStatePaused:
 		return true
 	default:
 		return false

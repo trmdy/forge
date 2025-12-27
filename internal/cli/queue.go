@@ -1,70 +1,61 @@
-// Package cli provides queue management CLI commands.
+// Package cli provides queue management commands.
 package cli
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
+	"time"
 
 	"github.com/opencode-ai/swarm/internal/db"
 	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/opencode-ai/swarm/internal/scheduler"
 	"github.com/spf13/cobra"
 )
 
 var (
-	// queue ls flags
-	queueListAgent  string
-	queueListStatus string
-	queueListLimit  int
-	queueListAll    bool
+	queueAgent  string
+	queueStatus string
+	queueLimit  int
+	queueAll    bool
 )
 
 func init() {
 	rootCmd.AddCommand(queueCmd)
 	queueCmd.AddCommand(queueListCmd)
 
-	// List flags
-	queueListCmd.Flags().StringVarP(&queueListAgent, "agent", "a", "", "filter by agent ID")
-	queueListCmd.Flags().StringVar(&queueListStatus, "status", "", "filter by status (pending, dispatched, completed, failed, skipped)")
-	queueListCmd.Flags().IntVarP(&queueListLimit, "limit", "n", 20, "max items to show")
-	queueListCmd.Flags().BoolVar(&queueListAll, "all", false, "show all items including completed")
+	queueListCmd.Flags().StringVarP(&queueAgent, "agent", "a", "", "filter by agent ID or prefix")
+	queueListCmd.Flags().StringVar(&queueStatus, "status", "", "filter by status (pending, blocked, dispatched, completed, failed, skipped)")
+	queueListCmd.Flags().IntVarP(&queueLimit, "limit", "n", 20, "max items to show per agent (0 = unlimited)")
+	queueListCmd.Flags().BoolVar(&queueAll, "all", false, "show all items including completed")
 }
 
 var queueCmd = &cobra.Command{
 	Use:   "queue",
 	Short: "Manage agent queues",
-	Long: `Manage agent message queues.
-
-The queue system controls message dispatch to agents. Messages are queued
-and dispatched when agents become available.`,
+	Long:  "Inspect and manage queued messages for agents.",
 }
 
 var queueListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
 	Short:   "List queue items",
-	Long: `List queue items for agents.
+	Long: `List queued items and their dispatch status.
 
-By default, shows pending and dispatched items. Use --all to include completed items.
-Use --agent to filter by a specific agent, or omit to show queues for all agents
-in the current workspace.`,
-	Example: `  # List queue for current workspace
-  swarm queue ls
-
-  # List queue for a specific agent
-  swarm queue ls --agent abc123
-
-  # Filter by status
-  swarm queue ls --status pending
-
-  # Show all items including completed
-  swarm queue ls --all
-
-  # Limit results
-  swarm queue ls -n 50`,
+By default, this lists queues for agents in the current workspace context.
+Use --agent to target a specific agent.`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
+
+		statusFilter, err := normalizeQueueStatus(queueStatus)
+		if err != nil {
+			return err
+		}
 
 		database, err := openDatabase()
 		if err != nil {
@@ -72,253 +63,314 @@ in the current workspace.`,
 		}
 		defer database.Close()
 
-		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
 		queueRepo := db.NewQueueRepository(database)
+		wsRepo := db.NewWorkspaceRepository(database)
 
-		// Determine which agents to query
-		var agentIDs []string
-
-		if queueListAgent != "" {
-			// Specific agent requested
-			agent, err := findAgent(ctx, agentRepo, queueListAgent)
-			if err != nil {
-				return err
-			}
-			agentIDs = append(agentIDs, agent.ID)
-		} else {
-			// Use workspace context to find agents
-			resolved, err := ResolveWorkspaceContext(ctx, wsRepo, "")
-			if err == nil && resolved != nil && resolved.WorkspaceID != "" {
-				// Get agents in this workspace
-				agents, err := agentRepo.ListByWorkspace(ctx, resolved.WorkspaceID)
-				if err != nil {
-					return fmt.Errorf("failed to list workspace agents: %w", err)
-				}
-				for _, a := range agents {
-					agentIDs = append(agentIDs, a.ID)
-				}
-			} else {
-				// No workspace context, list all agents
-				agents, err := agentRepo.List(ctx)
-				if err != nil {
-					return fmt.Errorf("failed to list agents: %w", err)
-				}
-				for _, a := range agents {
-					agentIDs = append(agentIDs, a.ID)
-				}
-			}
+		agents, err := resolveQueueAgents(ctx, agentRepo, wsRepo, queueAgent)
+		if err != nil {
+			return err
 		}
-
-		if len(agentIDs) == 0 {
+		if len(agents) == 0 {
 			if IsJSONOutput() || IsJSONLOutput() {
-				return WriteOutput(os.Stdout, []any{})
+				return WriteOutput(os.Stdout, []queueListAgent{})
 			}
 			fmt.Println("No agents found")
 			return nil
 		}
 
-		// Collect all queue items
-		type queueItemWithAgent struct {
-			*models.QueueItem
-			AgentShortID string `json:"agent_short_id"`
-		}
+		output := make([]queueListAgent, 0, len(agents))
+		anyRows := false
 
-		var allItems []queueItemWithAgent
-		for _, agentID := range agentIDs {
-			var items []*models.QueueItem
-			var err error
-
-			if queueListAll {
-				items, err = queueRepo.List(ctx, agentID)
-			} else {
-				items, err = queueRepo.List(ctx, agentID)
-				// Filter out completed items if not --all
-				filtered := make([]*models.QueueItem, 0, len(items))
-				for _, item := range items {
-					if item.Status != models.QueueItemStatusCompleted &&
-						item.Status != models.QueueItemStatusFailed &&
-						item.Status != models.QueueItemStatusSkipped {
-						filtered = append(filtered, item)
-					}
-				}
-				items = filtered
-			}
-
+		for _, a := range agents {
+			items, err := queueRepo.List(ctx, a.ID)
 			if err != nil {
-				return fmt.Errorf("failed to list queue for agent %s: %w", agentID, err)
+				return fmt.Errorf("failed to list queue for agent %s: %w", a.ID, err)
 			}
 
-			// Apply status filter if specified
-			if queueListStatus != "" {
-				statusFilter := models.QueueItemStatus(queueListStatus)
-				filtered := make([]*models.QueueItem, 0)
-				for _, item := range items {
-					if item.Status == statusFilter {
-						filtered = append(filtered, item)
-					}
-				}
-				items = filtered
+			view := buildQueueView(a, items, statusFilter, queueAll, queueLimit)
+			if len(view) == 0 {
+				continue
 			}
+			anyRows = true
 
-			for _, item := range items {
-				allItems = append(allItems, queueItemWithAgent{
-					QueueItem:    item,
-					AgentShortID: shortID(agentID),
-				})
-			}
-		}
-
-		// Apply limit
-		if queueListLimit > 0 && len(allItems) > queueListLimit {
-			allItems = allItems[:queueListLimit]
+			output = append(output, queueListAgent{
+				AgentID:   a.ID,
+				AgentType: a.Type,
+				Items:     view,
+			})
 		}
 
 		if IsJSONOutput() || IsJSONLOutput() {
-			return WriteOutput(os.Stdout, allItems)
+			return WriteOutput(os.Stdout, output)
 		}
 
-		if len(allItems) == 0 {
+		if !anyRows {
 			fmt.Println("No queue items found")
 			return nil
 		}
 
-		// Print header
-		if queueListAgent != "" {
-			fmt.Printf("QUEUE FOR AGENT %s (%d items)\n\n", shortID(queueListAgent), len(allItems))
-		} else {
-			fmt.Printf("QUEUE ITEMS (%d total)\n\n", len(allItems))
-		}
+		for i, agentView := range output {
+			if i > 0 {
+				fmt.Println()
+			}
+			fmt.Printf("QUEUE FOR AGENT %s (%d items)\n\n", shortID(agentView.AgentID), len(agentView.Items))
 
-		// Get agent states for block reason calculation
-		agentStates := make(map[string]models.AgentState)
-		for _, agentID := range agentIDs {
-			agent, err := agentRepo.Get(ctx, agentID)
-			if err == nil {
-				agentStates[agentID] = agent.State
+			rows := make([][]string, 0, len(agentView.Items))
+			for _, item := range agentView.Items {
+				blockReason := item.BlockReason
+				if blockReason == "" {
+					blockReason = "-"
+				}
+
+				rows = append(rows, []string{
+					fmt.Sprintf("%d", item.Item.Position),
+					string(item.Item.Type),
+					item.DisplayStatus,
+					blockReason,
+					item.Preview,
+					formatRelativeTime(item.Item.CreatedAt),
+				})
+			}
+
+			if err := writeTable(os.Stdout, []string{"POS", "TYPE", "STATUS", "BLOCK REASON", "CONTENT", "CREATED"}, rows); err != nil {
+				return err
 			}
 		}
 
-		// Build table rows
-		rows := make([][]string, 0, len(allItems))
-		for _, item := range allItems {
-			content := formatQueueContent(item.QueueItem)
-			created := formatRelativeTime(item.CreatedAt)
-			blockReason := formatBlockReason(item.QueueItem, agentStates[item.AgentID])
-
-			row := []string{
-				fmt.Sprintf("%d", item.Position),
-				string(item.Type),
-				formatQueueStatus(item.Status),
-				blockReason,
-				content,
-				created,
-			}
-
-			// Add agent column if showing multiple agents
-			if queueListAgent == "" {
-				row = append([]string{item.AgentShortID}, row...)
-			}
-
-			rows = append(rows, row)
-		}
-
-		// Build headers
-		headers := []string{"POS", "TYPE", "STATUS", "BLOCK", "CONTENT", "CREATED"}
-		if queueListAgent == "" {
-			headers = append([]string{"AGENT"}, headers...)
-		}
-
-		return writeTable(os.Stdout, headers, rows)
+		return nil
 	},
 }
 
-// formatQueueContent extracts a preview of the queue item content.
-func formatQueueContent(item *models.QueueItem) string {
-	switch item.Type {
-	case models.QueueItemTypeMessage:
-		var payload models.MessagePayload
-		if err := json.Unmarshal(item.Payload, &payload); err == nil {
-			return truncate(payload.Text, 40)
-		}
-	case models.QueueItemTypePause:
-		var payload models.PausePayload
-		if err := json.Unmarshal(item.Payload, &payload); err == nil {
-			return fmt.Sprintf("%ds pause", payload.DurationSeconds)
-		}
-	case models.QueueItemTypeConditional:
-		var payload models.ConditionalPayload
-		if err := json.Unmarshal(item.Payload, &payload); err == nil {
-			return fmt.Sprintf("[%s] %s", payload.ConditionType, truncate(payload.Message, 30))
-		}
-	}
-	return "-"
+type queueListAgent struct {
+	AgentID   string           `json:"agent_id"`
+	AgentType models.AgentType `json:"agent_type"`
+	Items     []queueListItem  `json:"items"`
 }
 
-// formatQueueStatus formats the queue item status for display.
-func formatQueueStatus(status models.QueueItemStatus) string {
-	switch status {
-	case models.QueueItemStatusPending:
-		return "pending"
-	case models.QueueItemStatusDispatched:
-		return "dispatched"
-	case models.QueueItemStatusCompleted:
-		return "completed"
-	case models.QueueItemStatusFailed:
-		return "failed"
-	case models.QueueItemStatusSkipped:
-		return "skipped"
-	default:
-		return string(status)
-	}
+type queueListItem struct {
+	Item          *models.QueueItem `json:"item"`
+	DisplayStatus string            `json:"display_status"`
+	BlockReason   string            `json:"block_reason,omitempty"`
+	Preview       string            `json:"preview"`
 }
 
-// formatBlockReason returns a human-readable reason why a queue item is blocked.
-func formatBlockReason(item *models.QueueItem, agentState models.AgentState) string {
-	// Only pending items can be blocked
+func resolveQueueAgents(ctx context.Context, agentRepo *db.AgentRepository, wsRepo *db.WorkspaceRepository, agentFilter string) ([]*models.Agent, error) {
+	if strings.TrimSpace(agentFilter) != "" {
+		agent, err := findAgent(ctx, agentRepo, agentFilter)
+		if err != nil {
+			return nil, err
+		}
+		return []*models.Agent{agent}, nil
+	}
+
+	resolved, err := ResolveWorkspaceContext(ctx, wsRepo, "")
+	if err != nil {
+		return nil, err
+	}
+	if resolved != nil && resolved.WorkspaceID != "" {
+		agents, err := agentRepo.ListByWorkspace(ctx, resolved.WorkspaceID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list agents: %w", err)
+		}
+		sort.Slice(agents, func(i, j int) bool { return agents[i].ID < agents[j].ID })
+		return agents, nil
+	}
+
+	agents, err := agentRepo.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list agents: %w", err)
+	}
+	sort.Slice(agents, func(i, j int) bool { return agents[i].ID < agents[j].ID })
+	return agents, nil
+}
+
+func buildQueueView(agent *models.Agent, items []*models.QueueItem, statusFilter string, showAll bool, limit int) []queueListItem {
+	if len(items) == 0 {
+		return nil
+	}
+
+	pendingCount := 0
+	for _, item := range items {
+		if item != nil && item.Status == models.QueueItemStatusPending {
+			pendingCount++
+		}
+	}
+
+	view := make([]queueListItem, 0, len(items))
+	pendingSeen := false
+
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+
+		isPending := item.Status == models.QueueItemStatusPending
+		isFirstPending := isPending && !pendingSeen
+		if isPending && !pendingSeen {
+			pendingSeen = true
+		}
+
+		displayStatus, blockReason := deriveQueueDisplay(agent, item, isFirstPending, pendingCount)
+		if !includeQueueItem(item, displayStatus, statusFilter, showAll) {
+			continue
+		}
+
+		view = append(view, queueListItem{
+			Item:          item,
+			DisplayStatus: displayStatus,
+			BlockReason:   blockReason,
+			Preview:       truncateMessage(queueItemPreview(item), 60),
+		})
+
+		if limit > 0 && len(view) >= limit {
+			break
+		}
+	}
+
+	return view
+}
+
+func deriveQueueDisplay(agent *models.Agent, item *models.QueueItem, firstPending bool, pendingCount int) (string, string) {
 	if item.Status != models.QueueItemStatusPending {
-		return "-"
+		return string(item.Status), ""
 	}
 
-	// Check agent state
-	switch agentState {
-	case models.AgentStateWorking:
-		return "agent_busy"
+	if !firstPending {
+		return "blocked", "dependency"
+	}
+
+	if item.Type == models.QueueItemTypeConditional {
+		reason, blocked := conditionalBlockReason(agent, item, pendingCount)
+		if blocked {
+			return "blocked", reason
+		}
+	}
+
+	stateReason := agentStateBlockReason(agent)
+	if stateReason != "" {
+		return "blocked", stateReason
+	}
+
+	return "pending", ""
+}
+
+func conditionalBlockReason(agent *models.Agent, item *models.QueueItem, pendingCount int) (string, bool) {
+	var payload models.ConditionalPayload
+	if err := json.Unmarshal(item.Payload, &payload); err != nil {
+		return "dependency", true
+	}
+
+	evaluator := scheduler.NewConditionEvaluator()
+	ctx := scheduler.ConditionContext{
+		Agent:       agent,
+		QueueLength: pendingCount,
+		Now:         time.Now().UTC(),
+	}
+	result, err := evaluator.Evaluate(context.Background(), ctx, payload)
+	if err != nil {
+		return "dependency", true
+	}
+	if result.Met {
+		return "", false
+	}
+
+	return conditionTypeReason(payload.ConditionType), true
+}
+
+func conditionTypeReason(condition models.ConditionType) string {
+	switch condition {
+	case models.ConditionTypeWhenIdle:
+		return "idle_gate"
+	case models.ConditionTypeAfterCooldown:
+		return "cooldown"
+	case models.ConditionTypeAfterPrevious:
+		return "dependency"
+	case models.ConditionTypeCustomExpression:
+		return "dependency"
+	default:
+		return "dependency"
+	}
+}
+
+func agentStateBlockReason(agent *models.Agent) string {
+	if agent == nil {
+		return "busy"
+	}
+	switch agent.State {
 	case models.AgentStatePaused:
 		return "paused"
 	case models.AgentStateRateLimited:
 		return "cooldown"
-	case models.AgentStateAwaitingApproval:
-		return "approval"
-	case models.AgentStateError:
-		return "error"
-	case models.AgentStateStopped:
-		return "stopped"
-	case models.AgentStateStarting:
-		return "starting"
+	case models.AgentStateWorking, models.AgentStateStarting, models.AgentStateAwaitingApproval:
+		return "busy"
+	case models.AgentStateError, models.AgentStateStopped:
+		return "busy"
+	default:
+		return ""
 	}
+}
 
-	// Check if it's a conditional item with unmet condition
-	if item.Type == models.QueueItemTypeConditional {
-		var payload models.ConditionalPayload
-		if err := json.Unmarshal(item.Payload, &payload); err == nil {
-			switch payload.ConditionType {
-			case models.ConditionTypeWhenIdle:
-				if agentState != models.AgentStateIdle {
-					return "idle_gate"
-				}
-			case models.ConditionTypeAfterCooldown:
-				return "cooldown_gate"
-			case models.ConditionTypeAfterPrevious:
-				return "dependency"
-			}
+func includeQueueItem(item *models.QueueItem, displayStatus string, statusFilter string, showAll bool) bool {
+	if statusFilter != "" {
+		if statusFilter == "blocked" {
+			return displayStatus == "blocked"
 		}
+		if statusFilter == "pending" {
+			return displayStatus == "pending"
+		}
+		return strings.EqualFold(string(item.Status), statusFilter)
 	}
 
-	// If it's position > 1, previous items are blocking
-	if item.Position > 1 {
-		return "queue_order"
+	if showAll {
+		return true
 	}
 
-	return "-"
+	if displayStatus == "pending" || displayStatus == "blocked" {
+		return true
+	}
+	return item.Status == models.QueueItemStatusDispatched
+}
+
+func normalizeQueueStatus(status string) (string, error) {
+	status = strings.TrimSpace(strings.ToLower(status))
+	if status == "" {
+		return "", nil
+	}
+
+	switch status {
+	case "pending", "blocked", "dispatched", "completed", "failed", "skipped":
+		return status, nil
+	default:
+		return "", errors.New("invalid status (use pending, blocked, dispatched, completed, failed, or skipped)")
+	}
+}
+
+func queueItemPreview(item *models.QueueItem) string {
+	switch item.Type {
+	case models.QueueItemTypeMessage:
+		var payload models.MessagePayload
+		if err := json.Unmarshal(item.Payload, &payload); err != nil {
+			return "invalid message payload"
+		}
+		return payload.Text
+	case models.QueueItemTypePause:
+		var payload models.PausePayload
+		if err := json.Unmarshal(item.Payload, &payload); err != nil {
+			return "invalid pause payload"
+		}
+		label := fmt.Sprintf("pause %ds", payload.DurationSeconds)
+		if strings.TrimSpace(payload.Reason) != "" {
+			label += " - " + strings.TrimSpace(payload.Reason)
+		}
+		return label
+	case models.QueueItemTypeConditional:
+		var payload models.ConditionalPayload
+		if err := json.Unmarshal(item.Payload, &payload); err != nil {
+			return "invalid conditional payload"
+		}
+		return payload.Message
+	default:
+		return "unknown queue item"
+	}
 }
