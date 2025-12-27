@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -137,6 +138,10 @@ type AgentMetadata struct {
 
 	// ProcessStats captures process-level resource metrics.
 	ProcessStats *ProcessStats `json:"process_stats,omitempty"`
+
+	// OpenCode contains connection details for OpenCode server integration.
+	// Only populated for agents of type AgentTypeOpenCode.
+	OpenCode *OpenCodeConnection `json:"opencode,omitempty"`
 }
 
 // UsageMetrics contains usage metrics captured from an agent runtime.
@@ -229,6 +234,45 @@ type ProcessStats struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// OpenCodeConnection contains connection details for an OpenCode server instance.
+// Each OpenCode agent runs its own server on a dedicated port.
+type OpenCodeConnection struct {
+	// Host is the hostname or IP where the OpenCode server is running.
+	Host string `json:"host"`
+
+	// Port is the allocated port number (typically in range 17000-17999).
+	Port int `json:"port"`
+
+	// SessionID is the OpenCode session identifier.
+	SessionID string `json:"session_id,omitempty"`
+}
+
+// BaseURL returns the HTTP base URL for the OpenCode server.
+func (o *OpenCodeConnection) BaseURL() string {
+	if o == nil || o.Host == "" || o.Port == 0 {
+		return ""
+	}
+	return fmt.Sprintf("http://%s:%d", o.Host, o.Port)
+}
+
+// EventsURL returns the SSE events endpoint URL.
+func (o *OpenCodeConnection) EventsURL() string {
+	base := o.BaseURL()
+	if base == "" {
+		return ""
+	}
+	return base + "/event"
+}
+
+// APIURL returns the API endpoint URL with optional path suffix.
+func (o *OpenCodeConnection) APIURL(path string) string {
+	base := o.BaseURL()
+	if base == "" {
+		return ""
+	}
+	return base + path
+}
+
 // Validate checks if the agent configuration is valid.
 func (a *Agent) Validate() error {
 	validation := &ValidationErrors{}
@@ -262,4 +306,28 @@ func (a *Agent) IsBlocked() bool {
 	default:
 		return false
 	}
+}
+
+// GetOpenCodeURL returns the base URL for the agent's OpenCode server.
+// Returns an error if the agent is not an OpenCode agent or has no connection info.
+func (a *Agent) GetOpenCodeURL() (string, error) {
+	if a.Type != AgentTypeOpenCode {
+		return "", fmt.Errorf("agent %s is not an OpenCode agent (type: %s)", a.ID, a.Type)
+	}
+	if a.Metadata.OpenCode == nil {
+		return "", fmt.Errorf("agent %s has no OpenCode connection info", a.ID)
+	}
+	url := a.Metadata.OpenCode.BaseURL()
+	if url == "" {
+		return "", fmt.Errorf("agent %s has incomplete OpenCode connection info", a.ID)
+	}
+	return url, nil
+}
+
+// HasOpenCodeConnection returns true if the agent has valid OpenCode connection details.
+func (a *Agent) HasOpenCodeConnection() bool {
+	return a.Type == AgentTypeOpenCode &&
+		a.Metadata.OpenCode != nil &&
+		a.Metadata.OpenCode.Host != "" &&
+		a.Metadata.OpenCode.Port > 0
 }
