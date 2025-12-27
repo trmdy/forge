@@ -338,7 +338,7 @@ func (s *Service) waitForReady(ctx context.Context, agent *models.Agent, opts Sp
 			return nil
 		}
 
-		state, reason, err := adapter.DetectState(output, nil)
+		state, reason, err := adapter.DetectState(output, agent.Metadata)
 		if err != nil {
 			continue
 		}
@@ -413,6 +413,23 @@ func (s *Service) cleanupRestartFailure(ctx context.Context, agent *models.Agent
 }
 
 func (s *Service) paneExists(ctx context.Context, target string) (bool, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false, fmt.Errorf("empty pane target")
+	}
+
+	// Handle global pane IDs (e.g., "%275") - these are globally unique
+	if strings.HasPrefix(target, "%") {
+		// Use tmux to check if pane exists directly
+		_, err := s.tmuxClient.CapturePane(ctx, target, false)
+		if err != nil {
+			// Pane doesn't exist or error
+			return false, nil
+		}
+		return true, nil
+	}
+
+	// Handle session:pane format (legacy)
 	session, paneSpec, ok := splitPaneTarget(target)
 	if !ok {
 		return false, fmt.Errorf("invalid pane target: %q", target)

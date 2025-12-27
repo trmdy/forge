@@ -131,6 +131,14 @@ func (e *Engine) GetAgent(ctx context.Context, agentID string) (*models.Agent, e
 	return agent, nil
 }
 
+// ListAgents retrieves all agents from the repository.
+func (e *Engine) ListAgents(ctx context.Context) ([]*models.Agent, error) {
+	if e.repo == nil {
+		return nil, nil
+	}
+	return e.repo.List(ctx)
+}
+
 // UpdateState updates an agent's state and notifies subscribers.
 func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.AgentState, info models.StateInfo, usage *models.UsageMetrics, diff *models.DiffMetadata) error {
 	return e.UpdateStateWithStats(ctx, agentID, state, info, usage, diff, nil)
@@ -222,8 +230,8 @@ func (e *Engine) DetectState(ctx context.Context, agentID string) (*DetectionRes
 		return e.detectBasicState(screen, screenHash), nil
 	}
 
-	// Use adapter for state detection
-	state, reason, err := adapter.DetectState(screen, nil)
+	// Use adapter for state detection, passing agent metadata for richer detection
+	state, reason, err := adapter.DetectState(screen, agent.Metadata)
 	if err != nil {
 		return nil, err
 	}
