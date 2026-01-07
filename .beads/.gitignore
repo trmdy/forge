@@ -10,9 +10,13 @@ daemon.lock
 daemon.log
 daemon.pid
 bd.sock
+bd.sock.startlock
 
 # Local version tracking (prevents upgrade notification spam after git ops)
 .local_version
+
+# Local activity markers
+last-touched
 
 # Legacy database files
 db.sqlite
