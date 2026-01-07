@@ -8,8 +8,8 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/tOgg1/forge/internal/db"
 	"github.com/spf13/cobra"
+	"github.com/tOgg1/forge/internal/db"
 )
 
 var (

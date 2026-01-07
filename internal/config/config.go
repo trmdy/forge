@@ -25,6 +25,15 @@ type Config struct {
 	// Accounts contains configured provider profiles.
 	Accounts []AccountConfig `yaml:"accounts" mapstructure:"accounts"`
 
+	// Profiles contains harness+auth profiles.
+	Profiles []ProfileConfig `yaml:"profiles" mapstructure:"profiles"`
+
+	// Pools contains pool definitions referencing profiles.
+	Pools []PoolConfig `yaml:"pools" mapstructure:"pools"`
+
+	// DefaultPool is the default pool name.
+	DefaultPool string `yaml:"default_pool" mapstructure:"default_pool"`
+
 	// Default settings for nodes
 	NodeDefaults NodeConfig `yaml:"node_defaults" mapstructure:"node_defaults"`
 
@@ -39,6 +48,9 @@ type Config struct {
 
 	// Scheduler settings
 	Scheduler SchedulerConfig `yaml:"scheduler" mapstructure:"scheduler"`
+
+	// LoopDefaults contains defaults for loops.
+	LoopDefaults LoopDefaultsConfig `yaml:"loop_defaults" mapstructure:"loop_defaults"`
 
 	// TUI settings
 	TUI TUIConfig `yaml:"tui" mapstructure:"tui"`
@@ -99,6 +111,29 @@ type AccountConfig struct {
 
 	// IsActive indicates if this account is enabled for use.
 	IsActive bool `yaml:"is_active" mapstructure:"is_active"`
+}
+
+// ProfileConfig defines a harness+auth profile.
+type ProfileConfig struct {
+	Name            string            `yaml:"name" mapstructure:"name"`
+	Harness         models.Harness    `yaml:"harness" mapstructure:"harness"`
+	AuthKind        string            `yaml:"auth_kind" mapstructure:"auth_kind"`
+	AuthHome        string            `yaml:"auth_home" mapstructure:"auth_home"`
+	PromptMode      models.PromptMode `yaml:"prompt_mode" mapstructure:"prompt_mode"`
+	CommandTemplate string            `yaml:"command_template" mapstructure:"command_template"`
+	Model           string            `yaml:"model" mapstructure:"model"`
+	ExtraArgs       []string          `yaml:"extra_args" mapstructure:"extra_args"`
+	Env             map[string]string `yaml:"env" mapstructure:"env"`
+	MaxConcurrency  int               `yaml:"max_concurrency" mapstructure:"max_concurrency"`
+}
+
+// PoolConfig defines a profile pool.
+type PoolConfig struct {
+	Name      string         `yaml:"name" mapstructure:"name"`
+	Strategy  string         `yaml:"strategy" mapstructure:"strategy"`
+	Profiles  []string       `yaml:"profiles" mapstructure:"profiles"`
+	Weights   map[string]int `yaml:"weights" mapstructure:"weights"`
+	IsDefault bool           `yaml:"is_default" mapstructure:"is_default"`
 }
 
 // NodeConfig contains default settings for nodes.
@@ -174,6 +209,18 @@ type AgentConfig struct {
 
 	// ApprovalRules apply when approval_policy is custom.
 	ApprovalRules []ApprovalRule `yaml:"approval_rules" mapstructure:"approval_rules"`
+}
+
+// LoopDefaultsConfig contains defaults for loop creation.
+type LoopDefaultsConfig struct {
+	// Interval is the sleep duration between iterations.
+	Interval time.Duration `yaml:"interval" mapstructure:"interval"`
+
+	// Prompt is the default base prompt path (optional).
+	Prompt string `yaml:"prompt" mapstructure:"prompt"`
+
+	// PromptMsg is the default base prompt message (optional).
+	PromptMsg string `yaml:"prompt_msg" mapstructure:"prompt_msg"`
 }
 
 // SchedulerConfig contains scheduler settings.
@@ -256,6 +303,9 @@ func DefaultConfig() *Config {
 			EnableCaller: false,
 		},
 		Accounts: []AccountConfig{},
+		Profiles: []ProfileConfig{},
+		Pools:    []PoolConfig{},
+		DefaultPool: "",
 		NodeDefaults: NodeConfig{
 			SSHBackend:          models.SSHBackendAuto,
 			SSHTimeout:          30 * time.Second,
@@ -279,6 +329,9 @@ func DefaultConfig() *Config {
 			RetryBackoff:            5 * time.Second,
 			DefaultCooldownDuration: 5 * time.Minute,
 			AutoRotateOnRateLimit:   true,
+		},
+		LoopDefaults: LoopDefaultsConfig{
+			Interval: 30 * time.Second,
 		},
 		TUI: TUIConfig{
 			RefreshInterval: 500 * time.Millisecond,
@@ -432,6 +485,60 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	profileNames := make(map[string]struct{})
+	for i, profile := range c.Profiles {
+		if strings.TrimSpace(profile.Name) == "" {
+			return fmt.Errorf("profiles[%d].name is required", i)
+		}
+		if _, exists := profileNames[profile.Name]; exists {
+			return fmt.Errorf("profiles[%d].name must be unique", i)
+		}
+		profileNames[profile.Name] = struct{}{}
+
+		if !isValidHarness(profile.Harness) {
+			return fmt.Errorf("profiles[%d].harness must be one of pi, opencode, codex, claude", i)
+		}
+		if profile.CommandTemplate == "" {
+			return fmt.Errorf("profiles[%d].command_template is required", i)
+		}
+		if profile.MaxConcurrency < 0 {
+			return fmt.Errorf("profiles[%d].max_concurrency must be >= 0", i)
+		}
+		if profile.PromptMode != "" && !isValidPromptMode(profile.PromptMode) {
+			return fmt.Errorf("profiles[%d].prompt_mode must be env, stdin, or path", i)
+		}
+	}
+
+	poolNames := make(map[string]struct{})
+	for i, pool := range c.Pools {
+		if strings.TrimSpace(pool.Name) == "" {
+			return fmt.Errorf("pools[%d].name is required", i)
+		}
+		if _, exists := poolNames[pool.Name]; exists {
+			return fmt.Errorf("pools[%d].name must be unique", i)
+		}
+		poolNames[pool.Name] = struct{}{}
+
+		for _, profileName := range pool.Profiles {
+			if profileName == "" {
+				return fmt.Errorf("pools[%d].profiles must not be empty", i)
+			}
+			if _, exists := profileNames[profileName]; !exists {
+				return fmt.Errorf("pools[%d].profiles references unknown profile %q", i, profileName)
+			}
+		}
+	}
+
+	if c.DefaultPool != "" {
+		if _, ok := poolNames[c.DefaultPool]; !ok {
+			return fmt.Errorf("default_pool references unknown pool %q", c.DefaultPool)
+		}
+	}
+
+	if c.LoopDefaults.Interval < 0 {
+		return fmt.Errorf("loop_defaults.interval must be zero or positive")
+	}
+
 	return nil
 }
 
@@ -442,6 +549,27 @@ func isValidAgentType(agentType models.AgentType) bool {
 		models.AgentTypeCodex,
 		models.AgentTypeGemini,
 		models.AgentTypeGeneric:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidHarness(harness models.Harness) bool {
+	switch harness {
+	case models.HarnessPi,
+		models.HarnessOpenCode,
+		models.HarnessCodex,
+		models.HarnessClaude:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidPromptMode(mode models.PromptMode) bool {
+	switch mode {
+	case models.PromptModeEnv, models.PromptModeStdin, models.PromptModePath:
 		return true
 	default:
 		return false

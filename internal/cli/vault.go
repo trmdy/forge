@@ -9,8 +9,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/tOgg1/forge/internal/vault"
 	"github.com/spf13/cobra"
+	"github.com/tOgg1/forge/internal/vault"
 )
 
 var (
@@ -31,7 +31,7 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(vaultCmd)
+	addLegacyCommand(vaultCmd)
 	vaultCmd.AddCommand(vaultInitCmd)
 	vaultCmd.AddCommand(vaultBackupCmd)
 	vaultCmd.AddCommand(vaultActivateCmd)

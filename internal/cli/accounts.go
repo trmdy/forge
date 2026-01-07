@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/account"
 	"github.com/tOgg1/forge/internal/account/caam"
 	"github.com/tOgg1/forge/internal/agent"
@@ -23,7 +24,6 @@ import (
 	"github.com/tOgg1/forge/internal/node"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/tOgg1/forge/internal/workspace"
-	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
@@ -48,7 +48,7 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(accountsCmd)
+	addLegacyCommand(accountsCmd)
 	accountsCmd.AddCommand(accountsListCmd)
 	accountsCmd.AddCommand(accountsAddCmd)
 	accountsCmd.AddCommand(accountsCooldownCmd)

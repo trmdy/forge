@@ -1,413 +1,82 @@
 # Forge
 
-A control plane for running and supervising AI coding agents across multiple repositories and servers.
+Forge runs looped AI coding agents per repository.
 
 ## Overview
 
-Forge provides a unified interface for managing AI coding agents (OpenCode, Claude Code, Codex, Gemini, etc.) running in tmux sessions across local and remote machines. It features:
+Forge focuses on a simple loop runtime instead of tmux- or node-managed agents. Each loop:
 
-- **TUI Dashboard** - Real-time monitoring of agent status, queues, and progress
-- **CLI** - Full automation support with JSON output for scripting
-- **Multi-Node Orchestration** - Manage agents across many servers via SSH
-- **Account Management** - Handle multiple provider accounts with cooldown and rotation
-- **Message Queuing** - Queue instructions with conditional dispatch and pauses
+- resolves a base prompt
+- applies queued messages/overrides
+- runs a harness command (pi, opencode, codex, claude)
+- appends logs + ledger entries
+- sleeps and repeats
+
+Key features:
+
+- **Loops**: background processes per repo
+- **Profiles + Pools**: harness + auth homes with concurrency caps
+- **Queue**: message, pause, stop, kill, next-prompt override
+- **Logs + Ledgers**: logs centralized in the data dir, ledgers committed per repo
+- **TUI**: 2x2 grid of active loops with log tails
 
 ## Core Concepts
 
 | Concept | Description |
 |---------|-------------|
-| **Node** | A machine (local or remote) that Forge controls via SSH and tmux |
-| **Workspace** | A managed unit binding a node + repo path + tmux session + agents |
-| **Agent** | A running AI coding CLI (OpenCode, Claude Code, etc.) in a tmux pane |
-| **Queue** | Per-agent message queue with conditional dispatch |
-
-## Architecture
-
-```
-                    ┌─────────────────────────────────────────┐
-                    │              Control Plane               │
-                    │  ┌─────────┐  ┌─────────┐  ┌─────────┐  │
-                    │  │   TUI   │  │   CLI   │  │Scheduler│  │
-                    │  └────┬────┘  └────┬────┘  └────┬────┘  │
-                    │       │            │            │        │
-                    │  ┌────┴────────────┴────────────┴────┐  │
-                    │  │          State Engine             │  │
-                    │  │     (SQLite + Event Log)          │  │
-                    │  └───────────────┬───────────────────┘  │
-                    └──────────────────┼──────────────────────┘
-                                       │
-              ┌────────────────────────┼────────────────────────┐
-              │                        │                        │
-        ┌─────┴─────┐            ┌─────┴─────┐            ┌─────┴─────┐
-        │  Node A   │            │  Node B   │            │  Node C   │
-        │  (local)  │            │  (remote) │            │  (remote) │
-        │           │            │           │            │           │
-        │ ┌───────┐ │            │ ┌───────┐ │            │ ┌───────┐ │
-        │ │forged │ │    SSH     │ │forged │ │    SSH     │ │forged │ │
-        │ └───┬───┘ │◄──────────►│ └───┬───┘ │◄──────────►│ └───┬───┘ │
-        │     │     │            │     │     │            │     │     │
-        │ ┌───┴───┐ │            │ ┌───┴───┐ │            │ ┌───┴───┐ │
-        │ │ tmux  │ │            │ │ tmux  │ │            │ │ tmux  │ │
-        │ │session│ │            │ │session│ │            │ │session│ │
-        │ └───────┘ │            │ └───────┘ │            │ └───────┘ │
-        └───────────┘            └───────────┘            └───────────┘
-```
-
-### Runtime Modes
-
-- **SSH-only (Mode A)**: Control plane uses SSH for tmux operations. Simple, minimal footprint.
-- **Daemon (Mode B)**: `forged` runs on nodes for real-time operations, better performance.
-
-## Installation
-
-### Prerequisites
-
-- Go 1.25+
-- tmux
-- Git
-- SSH (for remote nodes)
-
-### Build from Source
-
-```bash
-git clone https://github.com/tOgg1/forge.git
-cd forge
-make build
-```
-
-Binaries are written to `./build/forge` and `./build/forged`.
-
-### Bootstrap a Node
-
-For fresh servers, use the bootstrap script:
-
-```bash
-# One-liner (downloads and verifies before running)
-curl -fsSL https://raw.githubusercontent.com/tOgg1/forge/main/scripts/install.sh | bash -s -- --install-extras
-
-# With Claude Code
-curl -fsSL https://raw.githubusercontent.com/tOgg1/forge/main/scripts/install.sh | bash -s -- --install-extras --install-claude
-```
+| **Loop** | Background process that repeatedly runs a harness against a prompt |
+| **Profile** | Harness + auth config (pi/opencode/codex/claude) |
+| **Pool** | Ordered list of profiles used for selection |
+| **Prompt** | Base prompt content or file used each iteration |
+| **Queue** | Per-loop queue of messages and control items |
+| **Ledger** | Markdown log of loop iterations stored in the repo |
 
 ## Quick Start
 
-### 1. Initialize Database
-
 ```bash
-forge migrate up
-```
+# 1) Initialize repo scaffolding
+forge init
 
-### 2. Add a Node
+# 2) Import aliases (or add a profile manually)
+forge profile import-aliases
+# forge profile add pi --name local
 
-```bash
-# Local node
-forge node add --name local --local
+# 3) Create a pool and add profiles
+forge pool create default
+forge pool add default oc1
+forge pool set-default default
 
-# Remote node
-forge node add --name server1 --ssh user@hostname
-```
+# 4) Start a loop
+forge up --count 1
 
-### 3. Create a Workspace
+# 5) Send a message and watch logs
+forge msg <loop-name> "Review the PRD and summarize next steps"
+forge logs <loop-name> -f
 
-```bash
-forge ws create --node local --path /path/to/your/repo
-```
-
-### 4. Spawn an Agent
-
-```bash
-forge agent spawn --workspace <workspace-id> --type opencode --count 1
-```
-
-### 5. Send Instructions
-
-```bash
-forge agent send <agent-id> "Implement the login feature"
-```
-
-### 6. Launch the TUI
-
-```bash
+# 6) Launch the TUI
 forge
 ```
 
-## Configuration
+## Repo Layout
 
-Create a config file at `~/.config/forge/config.yaml`:
+Forge keeps committed repo state in `.forge/`:
 
-```yaml
-global:
-  data_dir: ~/.local/share/forge
-  auto_register_local_node: true
-
-database:
-  max_connections: 10
-  busy_timeout_ms: 5000
-
-logging:
-  level: info
-  format: console
-
-node_defaults:
-  ssh_backend: auto
-  ssh_timeout: 30s
-  health_check_interval: 60s
-
-agent_defaults:
-  default_type: opencode
-  state_polling_interval: 2s
-  idle_timeout: 10s
-  approval_policy: strict
-
-scheduler:
-  dispatch_interval: 1s
-  max_retries: 3
-  auto_rotate_on_rate_limit: true
+```
+.forge/
+  forge.yaml
+  prompts/
+  templates/
+  sequences/
+  ledgers/
 ```
 
-See [docs/config.md](docs/config.md) for the full configuration reference.
+Runtime data (sqlite, logs, pids) stays in the machine-local data dir.
+
+## Configuration
+
+Global config lives at `~/.config/forge/config.yaml`. Repo config lives at `.forge/forge.yaml`.
+See `docs/config.md` for details.
 
 ## CLI Reference
 
-### Nodes
-
-```bash
-forge node list                    # List all nodes
-forge node add --name <n> --local  # Add local node
-forge node add --name <n> --ssh user@host  # Add remote node
-forge node remove <node>           # Remove a node
-forge node doctor <node>           # Diagnose node issues
-forge node exec <node> -- <cmd>    # Execute command on node
-```
-
-### Workspaces
-
-```bash
-forge ws create --node <n> --path <repo>  # Create workspace
-forge ws import --node <n> --tmux <sess>  # Import existing tmux session
-forge ws list                             # List workspaces
-forge ws status <ws>                      # Show workspace status
-forge ws attach <ws>                      # Attach to tmux session
-forge ws remove <ws>                      # Remove workspace
-```
-
-### Agents
-
-```bash
-forge agent spawn --ws <ws> --type opencode --count 3  # Spawn agents
-forge agent list [--workspace <ws>]                    # List agents
-forge agent status <agent>                             # Show agent status
-forge agent send <agent> "message"                     # Send instruction
-forge agent queue <agent> --file prompts.txt           # Queue messages
-forge agent pause <agent> --minutes 20                 # Pause agent
-forge agent resume <agent>                             # Resume agent
-forge agent interrupt <agent>                          # Send Ctrl+C
-forge agent restart <agent>                            # Restart agent
-forge agent terminate <agent>                          # Kill agent
-forge agent approve <agent> [--all]                    # Handle approvals
-```
-
-### Accounts
-
-```bash
-forge accounts list                    # List accounts
-forge accounts add --provider openai   # Add account
-forge accounts cooldown list           # Show cooldowns
-forge accounts rotate --provider X     # Rotate account
-```
-
-### Export & Audit
-
-```bash
-forge export status --json             # Export status as JSON
-forge export events --since 1h --jsonl # Export events
-forge audit                            # View audit log
-```
-
-## Agent Adapters
-
-Forge supports multiple AI coding CLIs through adapters:
-
-| Tier | Adapter | Integration Level | Features |
-|------|---------|-------------------|----------|
-| 3 | `opencode` | Native | Full telemetry, structured events, API control |
-| 2 | `claude-code` | Telemetry | Stream JSON parsing, good state detection |
-| 2 | `gemini` | Telemetry | Log-based state detection |
-| 2 | `codex` | Telemetry | CLI state detection |
-| 1 | `generic` | Basic | tmux-only, heuristic detection |
-
-## Agent States
-
-| State | Description |
-|-------|-------------|
-| `working` | Agent is actively processing |
-| `idle` | Agent is waiting for instructions |
-| `awaiting_approval` | Agent needs human approval |
-| `rate_limited` | Provider rate limit hit |
-| `error` | Agent encountered an error |
-| `paused` | Agent is manually paused |
-| `starting` | Agent is initializing |
-| `stopped` | Agent has terminated |
-
-## TUI Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `q` / `Ctrl+C` | Quit |
-| `:` / `Ctrl+K` | Command palette |
-| `Tab` | Cycle focus |
-| `Enter` | Select / Expand |
-| `?` | Help |
-| `r` | Refresh |
-| `a` | Approve action |
-| `p` | Pause agent |
-
-## forged (Node Daemon)
-
-The optional `forged` daemon provides enhanced features:
-
-- **Real-time screen capture** with content hashing
-- **Resource monitoring** with CPU/memory limits
-- **Rate limiting** for API protection
-- **gRPC API** for control plane communication
-
-### Running forged
-
-```bash
-forged --port 50051 --log-level info
-```
-
-### Resource Limits
-
-Configure per-agent resource caps:
-
-```bash
-forge agent spawn --ws <ws> --type opencode \
-  --max-memory 2G \
-  --max-cpu 200  # 200% = 2 cores
-```
-
-## Project Structure
-
-```
-forge/
-├── cmd/
-│   ├── forge/      # Main CLI/TUI binary
-│   └── forged/     # Node daemon binary
-├── internal/
-│   ├── cli/        # CLI commands (Cobra)
-│   ├── tui/        # TUI components (Bubble Tea)
-│   ├── forged/     # Daemon implementation
-│   ├── agent/      # Agent service
-│   ├── adapters/   # Agent CLI adapters
-│   ├── state/      # State engine
-│   ├── scheduler/  # Message dispatch
-│   ├── node/       # Node management
-│   ├── workspace/  # Workspace management
-│   ├── queue/      # Message queue
-│   ├── account/    # Account management
-│   ├── db/         # SQLite repositories
-│   ├── config/     # Configuration
-│   ├── ssh/        # SSH execution
-│   ├── tmux/       # tmux client
-│   ├── events/     # Event logging
-│   └── models/     # Domain models
-├── proto/
-│   └── forged/v1/  # gRPC protocol definitions
-├── gen/
-│   └── forged/v1/  # Generated protobuf code
-├── docs/           # Documentation
-└── scripts/        # Bootstrap and install scripts
-```
-
-## Development
-
-### Running Tests
-
-```bash
-make test
-```
-
-### Generating Protobuf Code
-
-```bash
-make proto
-```
-
-### Linting
-
-```bash
-make lint
-```
-
-### Building for Release
-
-```bash
-make release
-```
-
-## Integrations
-
-### beads/bv Issue Tracking
-
-Forge integrates with [beads](https://github.com/Dicklesworthstone/beads_viewer) for issue tracking. When a workspace contains a `.beads/` directory, Forge displays task status in the TUI.
-
-### Agent Mail (MCP)
-
-Optional integration with Agent Mail for:
-- Workspace mailbox view
-- File/path claims to prevent agent conflicts
-- Multi-agent coordination
-
-## Troubleshooting
-
-### Common Issues
-
-**Agent not detecting state correctly**
-- Check adapter tier - Tier 1 (generic) uses heuristics
-- Increase `state_polling_interval` for more frequent checks
-- Use `forge agent status <id>` to see detection confidence
-
-**SSH connection failures**
-- Run `forge node doctor <node>` to diagnose
-- Check `~/.ssh/config` is correct
-- Try `ssh_backend: system` in config
-
-**Database locked errors**
-- Increase `busy_timeout_ms` in config
-- Ensure only one Forge instance is running
-
-See [docs/troubleshooting.md](docs/troubleshooting.md) for more solutions.
-
-## Roadmap
-
-### v0.1 (MVP)
-- [x] Workspace/agent management
-- [x] Basic TUI dashboard
-- [x] CLI parity
-- [x] SSH-only mode
-- [x] OpenCode adapter
-
-### v0.2
-- [x] forged daemon
-- [x] Resource caps enforcement
-- [x] Approvals inbox (TUI integration)
-- [x] Account rotation
-
-### v1.0
-- [ ] Distributed workspaces (single workspace across multiple nodes)
-- [ ] Recipes/roles system
-- [ ] Worktree isolation
-- [ ] Supervisor AI mode
-
-## Contributing
-
-Contributions are welcome! Please read the contributing guidelines before submitting PRs.
-
-## License
-
-Apache-2.0
-
----
-
-Built with Go, [Bubble Tea](https://github.com/charmbracelet/bubbletea), and [gRPC](https://grpc.io/).
+See `docs/cli.md` for the full CLI surface.

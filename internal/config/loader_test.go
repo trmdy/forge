@@ -117,6 +117,51 @@ func TestValidation(t *testing.T) {
 	}
 }
 
+func TestLoopConfigValidation(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Profiles = []ProfileConfig{{
+		Name:            "pi-work",
+		Harness:         "pi",
+		CommandTemplate: "pi -p \"{prompt}\"",
+		MaxConcurrency:  1,
+	}}
+	cfg.Pools = []PoolConfig{{
+		Name:     "default",
+		Strategy: "round_robin",
+		Profiles: []string{"pi-work"},
+	}}
+	cfg.DefaultPool = "default"
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Valid loop config failed validation: %v", err)
+	}
+
+	cfg = DefaultConfig()
+	cfg.Profiles = []ProfileConfig{{
+		Name:            "bad",
+		Harness:         "unknown",
+		CommandTemplate: "echo",
+	}}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("Expected validation error for invalid harness")
+	}
+
+	cfg = DefaultConfig()
+	cfg.Profiles = []ProfileConfig{{
+		Name:            "pi-work",
+		Harness:         "pi",
+		CommandTemplate: "pi -p \"{prompt}\"",
+	}}
+	cfg.Pools = []PoolConfig{{
+		Name:     "default",
+		Strategy: "round_robin",
+		Profiles: []string{"missing"},
+	}}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("Expected validation error for unknown pool profile reference")
+	}
+}
+
 func TestConfigFileNotFound(t *testing.T) {
 	// Should not error when config file doesn't exist (uses defaults)
 	cfg, err := LoadDefault()

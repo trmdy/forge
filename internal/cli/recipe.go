@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/agent"
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/models"
@@ -16,7 +17,6 @@ import (
 	"github.com/tOgg1/forge/internal/templates"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/tOgg1/forge/internal/workspace"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -25,7 +25,7 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(recipeCmd)
+	addLegacyCommand(recipeCmd)
 	recipeCmd.AddCommand(recipeListCmd)
 	recipeCmd.AddCommand(recipeShowCmd)
 	recipeCmd.AddCommand(recipeRunCmd)

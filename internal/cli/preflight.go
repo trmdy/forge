@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/models"
 	"github.com/tOgg1/forge/internal/node"
 	"github.com/tOgg1/forge/internal/workspace"
-	"github.com/spf13/cobra"
 )
 
 // PreflightError carries a message and suggested next steps.
@@ -203,7 +203,7 @@ func maybeWarnMissingConfig() {
 	}
 
 	fmt.Fprintln(os.Stderr, "Warning: no config file found.")
-	fmt.Fprintln(os.Stderr, "Hint: run `forge init` to create a config file.")
+	fmt.Fprintln(os.Stderr, "Hint: create ~/.config/forge/config.yaml (see docs/config.example.yaml).")
 }
 
 func checkTmux(cmd *cobra.Command) error {
@@ -217,7 +217,7 @@ func checkTmux(cmd *cobra.Command) error {
 	return &PreflightError{
 		Message:  "tmux is required for this command",
 		Hint:     "Install tmux and ensure it is in PATH",
-		NextStep: "forge init",
+		NextStep: "Install tmux",
 	}
 }
 
@@ -275,7 +275,7 @@ func checkSSH(cmd *cobra.Command) error {
 	return &PreflightError{
 		Message:  "ssh binary not found for system backend",
 		Hint:     "Install OpenSSH client or switch to native SSH backend",
-		NextStep: "forge init",
+		NextStep: "Install OpenSSH client",
 	}
 }
 
@@ -285,7 +285,7 @@ func checkDatabase(ctx context.Context) error {
 		return &PreflightError{
 			Message:  "database unavailable",
 			Hint:     "Check database path and permissions",
-			NextStep: "forge init",
+			NextStep: "Check database path",
 			Err:      err,
 		}
 	}
@@ -297,13 +297,13 @@ func checkDatabase(ctx context.Context) error {
 			return &PreflightError{
 				Message:  "database not migrated",
 				Hint:     "Run `forge migrate up` to initialize the database",
-				NextStep: "forge init",
+				NextStep: "forge migrate up",
 			}
 		}
 		return &PreflightError{
 			Message:  "failed to read database schema version",
 			Hint:     "Ensure the database is reachable and not locked",
-			NextStep: "forge init",
+			NextStep: "Check database connectivity",
 			Err:      err,
 		}
 	}
@@ -311,7 +311,7 @@ func checkDatabase(ctx context.Context) error {
 		return &PreflightError{
 			Message:  "database has no migrations applied",
 			Hint:     "Run `forge migrate up` to initialize the database",
-			NextStep: "forge init",
+			NextStep: "forge migrate up",
 		}
 	}
 

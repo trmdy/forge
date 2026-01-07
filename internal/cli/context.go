@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/config"
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/models"
-	"github.com/spf13/cobra"
 )
 
 var (

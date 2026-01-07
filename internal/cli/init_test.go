@@ -3,182 +3,94 @@ package cli
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestCheckPrerequisites(t *testing.T) {
-	result := checkPrerequisites()
+func TestInitCreatesScaffold(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(originalWd) }()
 
-	// tmux and git should be available in most dev environments
-	// If not, this test will show what's missing
-	if result.status == "failed" {
-		t.Logf("Prerequisites check failed: %s", result.message)
-		t.Logf("This is expected if tmux or git is not installed")
-		return
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir failed: %v", err)
 	}
 
-	if result.status != "done" {
-		t.Errorf("expected status 'done', got %q", result.status)
-	}
-
-	// Should mention both tools
-	if !strings.Contains(result.message, "tmux") && !strings.Contains(result.message, "git") {
-		t.Errorf("expected message to mention tmux and git, got: %s", result.message)
-	}
-}
-
-func TestCreateConfigFile(t *testing.T) {
-	// Create a temp directory for testing
-	tempDir := t.TempDir()
-
-	// Override the config dir function
-	originalFunc := configDirFunc
-	configDirFunc = func() string {
-		return tempDir
-	}
-	defer func() {
-		configDirFunc = originalFunc
-	}()
-
-	// Force mode for non-interactive
-	originalForce := initForce
-	initForce = true
-	defer func() {
-		initForce = originalForce
-	}()
-
-	result := createConfigFile()
-
-	if result.status != "done" {
-		t.Errorf("expected status 'done', got %q: %s", result.status, result.message)
-	}
-
-	// Check file was created
-	configPath := filepath.Join(tempDir, "config.yaml")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		t.Errorf("config file was not created at %s", configPath)
-	}
-
-	// Check content
-	content, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("failed to read config file: %v", err)
-	}
-
-	if !strings.Contains(string(content), "Forge Configuration File") {
-		t.Error("config file doesn't contain expected header")
-	}
-	if !strings.Contains(string(content), "auto_register_local_node: true") {
-		t.Error("config file doesn't contain expected default")
-	}
-}
-
-func TestCreateConfigFile_ExistingNoForce(t *testing.T) {
-	// Create a temp directory with existing config
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "config.yaml")
-	if err := os.WriteFile(configPath, []byte("existing"), 0644); err != nil {
-		t.Fatalf("failed to create existing config: %v", err)
-	}
-
-	// Override the config dir function
-	originalFunc := configDirFunc
-	configDirFunc = func() string {
-		return tempDir
-	}
-	defer func() {
-		configDirFunc = originalFunc
-	}()
-
-	// No force, should skip
-	originalForce := initForce
 	initForce = false
-	defer func() {
-		initForce = originalForce
-	}()
+	initPromptsFrom = ""
+	initNoCreatePrompt = false
 
-	result := createConfigFile()
-
-	if result.status != "skipped" {
-		t.Errorf("expected status 'skipped', got %q: %s", result.status, result.message)
+	if err := runInit(nil, nil); err != nil {
+		t.Fatalf("runInit failed: %v", err)
 	}
 
-	// Verify original file unchanged
-	content, _ := os.ReadFile(configPath)
-	if string(content) != "existing" {
-		t.Error("existing config was modified")
-	}
-}
-
-func TestGetConfigDir(t *testing.T) {
-	// Test with XDG_CONFIG_HOME set
-	originalXDG := os.Getenv("XDG_CONFIG_HOME")
-	defer os.Setenv("XDG_CONFIG_HOME", originalXDG)
-
-	os.Setenv("XDG_CONFIG_HOME", "/custom/config")
-	dir := defaultConfigDir()
-	if dir != "/custom/config/forge" {
-		t.Errorf("expected /custom/config/forge, got %s", dir)
+	forgeDir := filepath.Join(tmpDir, ".forge")
+	paths := []string{
+		filepath.Join(forgeDir, "prompts"),
+		filepath.Join(forgeDir, "templates"),
+		filepath.Join(forgeDir, "sequences"),
+		filepath.Join(forgeDir, "ledgers"),
+		filepath.Join(forgeDir, "forge.yaml"),
+		filepath.Join(tmpDir, "PROMPT.md"),
 	}
 
-	// Test without XDG_CONFIG_HOME
-	os.Unsetenv("XDG_CONFIG_HOME")
-	dir = defaultConfigDir()
-	homeDir, _ := os.UserHomeDir()
-	expected := filepath.Join(homeDir, ".config", "forge")
-	if dir != expected {
-		t.Errorf("expected %s, got %s", expected, dir)
-	}
-}
-
-func TestConfigTemplate(t *testing.T) {
-	// Verify template is valid YAML-like
-	if !strings.HasPrefix(configTemplate, "# Forge Configuration File") {
-		t.Error("config template doesn't have expected header")
-	}
-
-	// Check essential sections exist
-	sections := []string{
-		"global:",
-		"database:",
-		"logging:",
-		"node_defaults:",
-		"workspace_defaults:",
-		"agent_defaults:",
-		"scheduler:",
-		"tui:",
-	}
-
-	for _, section := range sections {
-		if !strings.Contains(configTemplate, section) {
-			t.Errorf("config template missing section: %s", section)
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected %s to exist: %v", path, err)
 		}
 	}
 }
 
-func TestInitResult_Structure(t *testing.T) {
-	results := []initResult{
-		{name: "Step 1", status: "done", message: "OK"},
-		{name: "Step 2", status: "skipped", message: "Already exists"},
-		{name: "Step 3", status: "failed", message: "Something went wrong"},
+func TestInitNoCreatePrompt(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(originalWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir failed: %v", err)
 	}
 
-	// Verify the structure is correct
-	for i, r := range results {
-		if r.name == "" {
-			t.Errorf("result %d has empty name", i)
-		}
-		if r.status == "" {
-			t.Errorf("result %d has empty status", i)
-		}
+	initForce = false
+	initPromptsFrom = ""
+	initNoCreatePrompt = true
+
+	if err := runInit(nil, nil); err != nil {
+		t.Fatalf("runInit failed: %v", err)
 	}
 
-	// Verify valid statuses
-	validStatuses := map[string]bool{"done": true, "skipped": true, "failed": true}
-	for i, r := range results {
-		if !validStatuses[r.status] {
-			t.Errorf("result %d has invalid status: %s", i, r.status)
-		}
+	if _, err := os.Stat(filepath.Join(tmpDir, "PROMPT.md")); err == nil {
+		t.Fatalf("PROMPT.md should not be created when --no-create-prompt is set")
+	}
+}
+
+func TestInitPromptsFrom(t *testing.T) {
+	tmpDir := t.TempDir()
+	promptDir := filepath.Join(tmpDir, "seed-prompts")
+	if err := os.MkdirAll(promptDir, 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+
+	seedPrompt := filepath.Join(promptDir, "review.md")
+	if err := os.WriteFile(seedPrompt, []byte("review"), 0644); err != nil {
+		t.Fatalf("write prompt failed: %v", err)
+	}
+
+	originalWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(originalWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir failed: %v", err)
+	}
+
+	initForce = false
+	initPromptsFrom = promptDir
+	initNoCreatePrompt = true
+
+	if err := runInit(nil, nil); err != nil {
+		t.Fatalf("runInit failed: %v", err)
+	}
+
+	copied := filepath.Join(tmpDir, ".forge", "prompts", "review.md")
+	if _, err := os.Stat(copied); err != nil {
+		t.Fatalf("expected copied prompt %s: %v", copied, err)
 	}
 }

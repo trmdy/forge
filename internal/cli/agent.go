@@ -59,7 +59,7 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(agentCmd)
+	addLegacyCommand(agentCmd)
 	agentCmd.AddCommand(agentSpawnCmd)
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentStatusCmd)

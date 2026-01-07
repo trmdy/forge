@@ -108,3 +108,20 @@ func getActionVerb(resourceType string) string {
 		return "delete"
 	}
 }
+
+// confirm prompts for a yes/no response.
+func confirm(prompt string) bool {
+	if SkipConfirmation() {
+		return true
+	}
+
+	fmt.Printf("%s [y/N]: ", prompt)
+	reader := bufio.NewReader(os.Stdin)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+
+	response = strings.TrimSpace(strings.ToLower(response))
+	return response == "y" || response == "yes"
+}

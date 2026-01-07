@@ -7,11 +7,11 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/db"
+	"github.com/tOgg1/forge/internal/forged"
 	"github.com/tOgg1/forge/internal/node"
 	"github.com/tOgg1/forge/internal/ssh"
-	"github.com/tOgg1/forge/internal/forged"
-	"github.com/spf13/cobra"
 )
 
 var (

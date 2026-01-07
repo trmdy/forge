@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/agent"
 	"github.com/tOgg1/forge/internal/beads"
 	"github.com/tOgg1/forge/internal/db"
@@ -19,7 +20,6 @@ import (
 	"github.com/tOgg1/forge/internal/node"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/tOgg1/forge/internal/workspace"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -49,7 +49,7 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(wsCmd)
+	addLegacyCommand(wsCmd)
 	wsCmd.AddCommand(wsCreateCmd)
 	wsCmd.AddCommand(wsImportCmd)
 	wsCmd.AddCommand(wsListCmd)

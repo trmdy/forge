@@ -25,4 +25,15 @@ var (
 	// Account errors
 	ErrInvalidProvider    = errors.New("provider is required")
 	ErrInvalidProfileName = errors.New("profile name is required")
+
+	// Loop errors
+	ErrInvalidLoopName     = errors.New("loop name is required")
+	ErrInvalidLoopRepoPath = errors.New("loop repo path is required")
+
+	// Profile errors
+	ErrInvalidProfileHarness = errors.New("profile harness is required")
+	ErrInvalidCommandTemplate = errors.New("command template is required")
+
+	// Pool errors
+	ErrInvalidPoolName = errors.New("pool name is required")
 )

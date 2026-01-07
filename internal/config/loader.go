@@ -84,6 +84,10 @@ func expandPaths(cfg *Config) {
 	cfg.Logging.File = expandTilde(cfg.Logging.File)
 	cfg.NodeDefaults.SSHKeyPath = expandTilde(cfg.NodeDefaults.SSHKeyPath)
 	cfg.EventRetention.ArchiveDir = expandTilde(cfg.EventRetention.ArchiveDir)
+	cfg.LoopDefaults.Prompt = expandTilde(cfg.LoopDefaults.Prompt)
+	for i := range cfg.Profiles {
+		cfg.Profiles[i].AuthHome = expandTilde(cfg.Profiles[i].AuthHome)
+	}
 }
 
 // setupViper configures Viper with defaults and environment bindings.
@@ -165,6 +169,14 @@ func (l *Loader) setDefaults(cfg *Config) {
 	v.SetDefault("scheduler.retry_backoff", cfg.Scheduler.RetryBackoff)
 	v.SetDefault("scheduler.default_cooldown_duration", cfg.Scheduler.DefaultCooldownDuration)
 	v.SetDefault("scheduler.auto_rotate_on_rate_limit", cfg.Scheduler.AutoRotateOnRateLimit)
+
+	// Loop defaults
+	v.SetDefault("loop_defaults.interval", cfg.LoopDefaults.Interval)
+	v.SetDefault("loop_defaults.prompt", cfg.LoopDefaults.Prompt)
+	v.SetDefault("loop_defaults.prompt_msg", cfg.LoopDefaults.PromptMsg)
+
+	// Pools/default pool
+	v.SetDefault("default_pool", cfg.DefaultPool)
 
 	// TUI
 	v.SetDefault("tui.refresh_interval", cfg.TUI.RefreshInterval)

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tOgg1/forge/internal/config"
-	"github.com/tOgg1/forge/internal/logging"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
+	"github.com/tOgg1/forge/internal/config"
+	"github.com/tOgg1/forge/internal/logging"
 )
 
 var (
@@ -19,12 +19,14 @@ var (
 	watchMode      bool
 	sinceDur       string
 	verbose        bool
+	quiet          bool
 	noColor        bool
 	noProgress     bool
 	nonInteractive bool
 	yesFlag        bool
 	logLevel       string
 	logFormat      string
+	chdirPath      string
 
 	// Global config loader and config
 	configLoader *config.Loader
@@ -76,18 +78,27 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&watchMode, "watch", false, "watch for changes and stream updates")
 	rootCmd.PersistentFlags().StringVar(&sinceDur, "since", "", "replay events since duration (e.g., 1h, 30m, 24h) or timestamp")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose output")
+	rootCmd.PersistentFlags().BoolVar(&quiet, "quiet", false, "suppress non-essential output")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output")
 	rootCmd.PersistentFlags().BoolVar(&noProgress, "no-progress", false, "disable progress output")
 	rootCmd.PersistentFlags().BoolVar(&nonInteractive, "non-interactive", false, "run without prompts, use defaults")
 	rootCmd.PersistentFlags().BoolVarP(&yesFlag, "yes", "y", false, "skip confirmation prompts")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "override logging level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "", "override logging format (json, console)")
+	rootCmd.PersistentFlags().StringVarP(&chdirPath, "chdir", "C", "", "change working directory for this command")
 }
 
 // initConfig loads configuration using Viper with proper precedence:
 // defaults < config file < env vars < CLI flags
 func initConfig() {
 	configLoader = config.NewLoader()
+
+	if chdirPath != "" {
+		if err := os.Chdir(chdirPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error changing directory: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	// Set explicit config file if provided via CLI flag
 	if cfgFile != "" {
@@ -178,6 +189,11 @@ func IsWatchMode() bool {
 // IsVerbose returns true if verbose mode is enabled.
 func IsVerbose() bool {
 	return verbose
+}
+
+// IsQuiet returns true if quiet mode is enabled.
+func IsQuiet() bool {
+	return quiet
 }
 
 // GetSinceFlag returns the raw --since flag value.

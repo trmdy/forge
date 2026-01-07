@@ -1,21 +1,21 @@
 # Forge Configuration Reference
 
-Forge uses a YAML configuration file loaded with the following precedence:
+Forge loads configuration in this precedence order:
 
 1. Defaults (built into the binary)
 2. Config file
 3. Environment variables
-4. CLI flags (when available)
+4. CLI flags
 
 ## Config file locations
 
-Forge looks for `config.yaml` in these locations (first match wins):
+Forge looks for `config.yaml` in:
 
 - `$XDG_CONFIG_HOME/forge/config.yaml`
 - `~/.config/forge/config.yaml`
 - `./config.yaml` (current directory)
 
-You can also pass an explicit path with `--config` (see `internal/cli/root.go`).
+You can also pass an explicit path with `--config`.
 
 ## Environment variable overrides
 
@@ -31,17 +31,12 @@ Examples:
 
 Duration fields use Go duration strings, for example: `250ms`, `2s`, `5m`, `1h`.
 
-## Full example
-
-See `docs/config.example.yaml` for a complete example file.
-
-## Configuration options
+## Global config (machine-local)
 
 ### global
 
-- `global.data_dir` (string): Data directory. Default: `~/.local/share/forge`.
+- `global.data_dir` (string): Data directory (database + logs). Default: `~/.local/share/forge`.
 - `global.config_dir` (string): Config directory. Default: `~/.config/forge`.
-- `global.auto_register_local_node` (bool): Register local node on startup. Default: `true`.
 
 ### database
 
@@ -56,57 +51,62 @@ See `docs/config.example.yaml` for a complete example file.
 - `logging.file` (string): Optional log file path. Default: empty.
 - `logging.enable_caller` (bool): Include caller info in logs. Default: `false`.
 
-### node_defaults
+### profiles
 
-Defaults applied when creating new nodes. Per-node overrides are not implemented yet.
+Profiles define harness + auth homes (machine-local).
 
-- `node_defaults.ssh_backend` (string): `native`, `system`, or `auto`. Default: `auto`.
-- `node_defaults.ssh_timeout` (duration): SSH connect timeout. Default: `30s`.
-- `node_defaults.ssh_key_path` (string): Default SSH private key path. Default: empty.
-- `node_defaults.health_check_interval` (duration): Node health check interval. Default: `60s`.
+- `profiles[].name` (string): Profile name (unique).
+- `profiles[].harness` (string): `pi`, `opencode`, `codex`, `claude`.
+- `profiles[].auth_kind` (string): Optional auth kind label (e.g., `claude`, `codex`).
+- `profiles[].auth_home` (string): Harness-specific auth/config directory (e.g., `~/.pi/agent-work`).
+- `profiles[].prompt_mode` (string): `env`, `stdin`, or `path`.
+- `profiles[].command_template` (string): Command template (supports `{prompt}` substitution).
+- `profiles[].model` (string): Optional model default.
+- `profiles[].extra_args` (list): Extra CLI args.
+- `profiles[].env` (map): Environment overrides.
+- `profiles[].max_concurrency` (int): Max concurrent runs for this profile.
 
-### workspace_defaults
+### pools
 
-Defaults applied when creating new workspaces.
+Pools are ordered lists of profile references.
 
-- `workspace_defaults.tmux_prefix` (string): Prefix for generated tmux sessions. Default: `forge`.
-- `workspace_defaults.default_agent_type` (string): `opencode`, `claude-code`, `codex`, `gemini`, `generic`. Default: `opencode`.
-- `workspace_defaults.auto_import_existing` (bool): Auto import existing tmux sessions. Default: `false`.
+- `pools[].name` (string): Pool name (unique).
+- `pools[].strategy` (string): `round_robin` (default).
+- `pools[].profiles` (list): Profile names in this pool.
+- `pools[].weights` (map): Optional weight per profile name.
+- `pools[].is_default` (bool): Mark as default pool.
 
-### workspace_overrides
+### default_pool
 
-Per-workspace overrides. Matches by `workspace_id`, `name`, or `repo_path` (supports glob patterns).
+- `default_pool` (string): Default pool name to use when loops are not pinned.
 
-- `workspace_overrides[].workspace_id` (string): Match a workspace ID.
-- `workspace_overrides[].name` (string): Match a workspace name.
-- `workspace_overrides[].repo_path` (string): Match a repo path (glob).
-- `workspace_overrides[].approval_policy` (string): `strict`, `permissive`, or `custom`.
-- `workspace_overrides[].approval_rules` (list): Rules applied when policy is `custom` (or when rules are set).
-  - `approval_rules[].request_type` (string): Request type to match (use `*` to match all).
-  - `approval_rules[].action` (string): `approve`, `deny`, or `prompt`.
+### loop_defaults
 
-### agent_defaults
-
-- `agent_defaults.default_type` (string): Default agent type. Default: `opencode`.
-- `agent_defaults.state_polling_interval` (duration): State polling interval. Default: `2s`.
-- `agent_defaults.idle_timeout` (duration): Idle timeout before marking idle. Default: `10s`.
-- `agent_defaults.transcript_buffer_size` (int): Max transcript lines. Default: `10000`.
-- `agent_defaults.approval_policy` (string): `strict`, `permissive`, or `custom`. Default: `strict`.
-- `agent_defaults.approval_rules` (list): Rules applied when policy is `custom` (or when rules are set).
-  - `approval_rules[].request_type` (string): Request type to match (use `*` to match all).
-  - `approval_rules[].action` (string): `approve`, `deny`, or `prompt`.
-
-### scheduler
-
-- `scheduler.dispatch_interval` (duration): Scheduler loop interval. Default: `1s`.
-- `scheduler.max_retries` (int): Dispatch retry limit. Default: `3`.
-- `scheduler.retry_backoff` (duration): Base backoff between retries. Default: `5s`.
-- `scheduler.default_cooldown_duration` (duration): Cooldown after rate limit. Default: `5m`.
-- `scheduler.auto_rotate_on_rate_limit` (bool): Rotate account automatically. Default: `true`.
+- `loop_defaults.interval` (duration): Sleep between iterations. Default: `30s`.
+- `loop_defaults.prompt` (string): Default prompt path or name (optional).
+- `loop_defaults.prompt_msg` (string): Default base prompt message (optional).
 
 ### tui
 
-- `tui.refresh_interval` (duration): UI refresh rate. Default: `500ms`.
-- `tui.theme` (string): `default`, `dark`, or `light`. Default: `default`.
-- `tui.show_timestamps` (bool): Show timestamps in UI. Default: `true`.
-- `tui.compact_mode` (bool): Use compact UI layout. Default: `false`.
+- `tui.refresh_interval` (duration): UI refresh rate. Default: `2s`.
+
+## Repo config (`.forge/forge.yaml`)
+
+Repo config is committed and describes loop defaults and shared assets.
+
+```yaml
+# Forge loop config
+# This file is committed with the repo.
+
+default_prompt: PROMPT.md
+
+ledger:
+  git_status: false
+  git_diff_stat: false
+```
+
+Fields:
+
+- `default_prompt`: Default prompt path for this repo.
+- `ledger.git_status`: Include `git status --porcelain` summary per ledger entry.
+- `ledger.git_diff_stat`: Include `git diff --stat` summary per ledger entry.

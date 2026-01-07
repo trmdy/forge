@@ -7,10 +7,10 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/node"
 	"github.com/tOgg1/forge/internal/workspace"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -18,7 +18,7 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(attachCmd)
+	addLegacyCommand(attachCmd)
 
 	attachCmd.Flags().BoolVar(&attachSelect, "select", false, "interactive selection")
 }

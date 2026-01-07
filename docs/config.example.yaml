@@ -3,23 +3,20 @@
 
 # Global settings
 global:
-  # Directory for Forge data (database, logs, transcripts)
+  # Directory for Forge data (database, centralized logs)
   data_dir: ~/.local/share/forge
-  
+
   # Directory for configuration files
   config_dir: ~/.config/forge
-  
-  # Automatically register the local machine as a node
-  auto_register_local_node: true
 
 # Database settings
 database:
   # SQLite database path (default: {data_dir}/forge.db)
   # path: ~/.local/share/forge/forge.db
-  
+
   # Maximum database connections
   max_connections: 10
-  
+
   # Timeout for locked database (milliseconds)
   busy_timeout_ms: 5000
 
@@ -27,114 +24,46 @@ database:
 logging:
   # Minimum log level: debug, info, warn, error
   level: info
-  
+
   # Output format: json, console
   format: console
-  
+
   # Optional log file path
   # file: ~/.local/share/forge/forge.log
-  
+
   # Include caller information in logs
   enable_caller: false
 
-# Accounts configuration
-# credentials can be env vars (env:VAR or $VAR), file paths, or vault references
-accounts:
-  # Example account
-  - provider: openai
-    profile_name: default
-    credential_ref: "$OPENAI_API_KEY"
-    is_active: true
+# Profiles configuration
+# Each profile is a harness + auth home combination.
+profiles:
+  - name: pi-work
+    harness: pi
+    auth_home: ~/.pi/agent-work
+    prompt_mode: env
+    command_template: 'pi -p "$FORGE_PROMPT_CONTENT"'
+    max_concurrency: 1
 
-# Default settings for nodes
-node_defaults:
-  # SSH backend: native (Go SSH), system (ssh binary), auto
-  ssh_backend: auto
-  
-  # SSH connection timeout
-  ssh_timeout: 30s
-  
-  # Default SSH key path (leave empty to use ssh-agent)
-  # ssh_key_path: ~/.ssh/id_ed25519
-  
-  # How often to check node health
-  health_check_interval: 60s
+# Pools configuration
+pools:
+  - name: default
+    strategy: round_robin
+    profiles: [pi-work]
+    is_default: true
 
-# Default settings for workspaces
-workspace_defaults:
-  # Prefix for generated tmux session names
-  tmux_prefix: forge
-  
-  # Default agent type to spawn
-  default_agent_type: opencode
-  
-  # Automatically import existing tmux sessions
-  auto_import_existing: false
+# Default pool name
+default_pool: default
 
-# Workspace-specific overrides
-workspace_overrides:
-  # Example: permissive approvals in a dev workspace
-  - name: my-project
-    approval_policy: permissive
-
-  # Example: custom approvals for sensitive repos
-  - repo_path: /repos/secure-*
-    approval_policy: custom
-    approval_rules:
-      - request_type: file_changes
-        action: approve
-      - request_type: shell_command
-        action: prompt
-
-# Default settings for agents
-agent_defaults:
-  # Default agent CLI type: opencode, claude-code, codex, gemini, generic
-  default_type: opencode
-  
-  # How often to poll agent state
-  state_polling_interval: 2s
-  
-  # Time of no activity before considering agent idle
-  idle_timeout: 10s
-  
-  # Maximum lines to keep in transcript buffer
-  transcript_buffer_size: 10000
-  
-  # Approval policy: strict (always ask), permissive (auto-approve), custom (use rules)
-  approval_policy: strict
-
-  # Optional rules for custom approval policy
-  # approval_rules:
-  #   - request_type: "*"
-  #     action: prompt
-
-# Scheduler settings
-scheduler:
-  # How often the scheduler runs dispatch checks
-  dispatch_interval: 1s
-  
-  # Maximum retry attempts for failed dispatches
-  max_retries: 3
-  
-  # Base backoff duration between retries
-  retry_backoff: 5s
-  
-  # Default cooldown duration after rate limiting
-  default_cooldown_duration: 5m
-  
-  # Automatically rotate to another account on rate limit
-  auto_rotate_on_rate_limit: true
+# Loop defaults
+loop_defaults:
+  # Sleep between iterations
+  interval: 30s
+  # Optional default prompt path
+  # prompt: PROMPT.md
+  # Optional default base prompt message
+  # prompt_msg: "Run tests and report failures."
 
 # TUI settings
 tui:
   # How often to refresh the display
-  refresh_interval: 500ms
-  
-  # Color theme: default, dark, light
-  theme: default
-  
-  # Show timestamps in the UI
-  show_timestamps: true
-  
-  # Use compact layout mode
-  compact_mode: false
+  refresh_interval: 2s
