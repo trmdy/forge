@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -96,6 +97,13 @@ var poolCreateCmd = &cobra.Command{
 		defer database.Close()
 
 		repo := db.NewPoolRepository(database)
+		if _, err := repo.GetDefault(context.Background()); err != nil {
+			if errors.Is(err, db.ErrPoolNotFound) {
+				pool.IsDefault = true
+			} else {
+				return err
+			}
+		}
 		if err := repo.Create(context.Background(), pool); err != nil {
 			return err
 		}
