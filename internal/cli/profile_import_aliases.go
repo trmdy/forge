@@ -44,6 +44,7 @@ var profileImportAliasesCmd = &cobra.Command{
 		defer database.Close()
 
 		repo := db.NewProfileRepository(database)
+		poolRepo := db.NewPoolRepository(database)
 		result := importAliasResult{}
 
 		ctx := context.Background()
@@ -92,6 +93,10 @@ var profileImportAliasesCmd = &cobra.Command{
 			result.Created = append(result.Created, profile.Name)
 		}
 
+		if err := maybeSelectDefaultPool(ctx, poolRepo, repo, result); err != nil {
+			return err
+		}
+
 		if IsJSONOutput() || IsJSONLOutput() {
 			return WriteOutput(os.Stdout, result)
 		}
@@ -122,6 +127,120 @@ func printAliasResult(result importAliasResult) {
 	if len(result.Missing) > 0 {
 		fmt.Fprintf(os.Stdout, "Missing: %s\n", strings.Join(result.Missing, ", "))
 	}
+}
+
+func maybeSelectDefaultPool(ctx context.Context, poolRepo *db.PoolRepository, profileRepo *db.ProfileRepository, result importAliasResult) error {
+	if SkipConfirmation() || !IsInteractive() {
+		return nil
+	}
+	if _, err := poolRepo.GetDefault(ctx); err == nil {
+		return nil
+	} else if !errors.Is(err, db.ErrPoolNotFound) {
+		return err
+	}
+
+	choices, err := defaultProfileChoices(ctx, profileRepo, result)
+	if err != nil {
+		return err
+	}
+	if len(choices) == 0 {
+		return nil
+	}
+
+	selection, ok, err := selectChoice("Select default profile", choices)
+	if err != nil || !ok {
+		return err
+	}
+
+	return ensureDefaultPoolForProfile(ctx, poolRepo, profileRepo, selection)
+}
+
+func defaultProfileChoices(ctx context.Context, repo *db.ProfileRepository, result importAliasResult) ([]string, error) {
+	seen := make(map[string]struct{})
+	choices := make([]string, 0, len(result.Created)+len(result.Skipped))
+	for _, name := range append(result.Created, result.Skipped...) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		choices = append(choices, name)
+	}
+	if len(choices) > 0 {
+		return choices, nil
+	}
+
+	profiles, err := repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, profile := range profiles {
+		name := strings.TrimSpace(profile.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		choices = append(choices, name)
+	}
+
+	return choices, nil
+}
+
+func ensureDefaultPoolForProfile(ctx context.Context, poolRepo *db.PoolRepository, profileRepo *db.ProfileRepository, profileName string) error {
+	profile, err := profileRepo.GetByName(ctx, profileName)
+	if err != nil {
+		return err
+	}
+
+	poolName := "default"
+	if cfg := GetConfig(); cfg != nil && strings.TrimSpace(cfg.DefaultPool) != "" {
+		poolName = cfg.DefaultPool
+	}
+
+	pool, err := poolRepo.GetByName(ctx, poolName)
+	if err != nil {
+		if !errors.Is(err, db.ErrPoolNotFound) {
+			return err
+		}
+		pool = &models.Pool{
+			Name:      poolName,
+			Strategy:  models.PoolStrategyRoundRobin,
+			IsDefault: true,
+		}
+		if err := poolRepo.Create(ctx, pool); err != nil {
+			return err
+		}
+	}
+
+	members, err := poolRepo.ListMembers(ctx, pool.ID)
+	if err != nil {
+		return err
+	}
+	position := 0
+	for _, member := range members {
+		if member.ProfileID == profile.ID {
+			return poolRepo.SetDefault(ctx, pool.ID)
+		}
+		if member.Position > position {
+			position = member.Position
+		}
+	}
+
+	member := &models.PoolMember{
+		PoolID:    pool.ID,
+		ProfileID: profile.ID,
+		Position:  position + 1,
+	}
+	if err := poolRepo.AddMember(ctx, member); err != nil {
+		return err
+	}
+	return poolRepo.SetDefault(ctx, pool.ID)
 }
 
 type aliasEntry struct {
@@ -533,6 +652,8 @@ func resolveAliasCommand(aliasName, aliasCmd string) (models.Harness, models.Pro
 		return buildCodex(aliasCmd)
 	case "cc1", "cc2", "cc3":
 		return buildClaude(aliasCmd)
+	case "droid1", "droid2":
+		return buildDroid(aliasCmd)
 	case "pi":
 		return buildPi(aliasCmd)
 	}
@@ -545,6 +666,8 @@ func resolveAliasCommand(aliasName, aliasCmd string) (models.Harness, models.Pro
 		return buildCodex(aliasCmd)
 	case models.HarnessClaude:
 		return buildClaude(aliasCmd)
+	case models.HarnessDroid:
+		return buildDroid(aliasCmd)
 	case models.HarnessPi:
 		return buildPi(aliasCmd)
 	default:
@@ -571,12 +694,20 @@ func buildClaude(aliasCmd string) (models.Harness, models.PromptMode, string) {
 	if !strings.Contains(command, "--dangerously-skip-permissions") {
 		command = command + " --dangerously-skip-permissions"
 	}
+	// Wrap with script to create a PTY so Claude streams output in real-time
+	command = fmt.Sprintf("script -q -c '%s' /dev/null", command)
 	return models.HarnessClaude, models.PromptModeEnv, command
 }
 
 func buildPi(aliasCmd string) (models.Harness, models.PromptMode, string) {
 	command := fmt.Sprintf("%s -p \"$FORGE_PROMPT_CONTENT\"", aliasCmd)
 	return models.HarnessPi, models.PromptModeEnv, command
+}
+
+func buildDroid(aliasCmd string) (models.Harness, models.PromptMode, string) {
+	// Droid reads from stdin when no prompt argument is provided
+	command := fmt.Sprintf("%s exec --skip-permissions-unsafe", aliasCmd)
+	return models.HarnessDroid, models.PromptModeStdin, command
 }
 
 func inferHarness(aliasName, aliasCmd string) models.Harness {
@@ -588,6 +719,8 @@ func inferHarness(aliasName, aliasCmd string) models.Harness {
 		return models.HarnessCodex
 	case strings.Contains(candidate, "claude"):
 		return models.HarnessClaude
+	case strings.Contains(candidate, "droid"):
+		return models.HarnessDroid
 	case strings.Contains(candidate, "pi"):
 		return models.HarnessPi
 	default:
@@ -621,7 +754,16 @@ func resolveAuthHome(aliasName string, env map[string]string) string {
 	if value := env["CODEX_HOME"]; value != "" {
 		return expandHome(value)
 	}
+	if value := env["OPENCODE_CONFIG_DIR"]; value != "" {
+		return expandHome(value)
+	}
 	if value := env["OPENCODE_HOME"]; value != "" {
+		return expandHome(value)
+	}
+	if value := env["XDG_DATA_HOME"]; value != "" {
+		return expandHome(value)
+	}
+	if value := env["CLAUDE_CONFIG_DIR"]; value != "" {
 		return expandHome(value)
 	}
 	if value := env["CLAUDE_HOME"]; value != "" {
