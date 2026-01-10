@@ -35,6 +35,12 @@ func TestLoopRepository_CreateGetUpdate(t *testing.T) {
 	if fetched.RepoPath != loop.RepoPath {
 		t.Fatalf("expected repo path %q, got %q", loop.RepoPath, fetched.RepoPath)
 	}
+	if fetched.ShortID == "" {
+		t.Fatalf("expected short ID to be set")
+	}
+	if loop.ShortID == "" {
+		t.Fatalf("expected loop short ID to be set on create")
+	}
 
 	fetched.State = models.LoopStateSleeping
 	if err := repo.Update(ctx, fetched); err != nil {

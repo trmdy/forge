@@ -256,6 +256,7 @@ CREATE INDEX IF NOT EXISTS idx_pool_members_profile_id ON pool_members(profile_i
 -- LOOPS TABLE
 CREATE TABLE IF NOT EXISTS loops (
     id TEXT PRIMARY KEY,
+    short_id TEXT NOT NULL,
     name TEXT NOT NULL UNIQUE,
     repo_path TEXT NOT NULL,
     base_prompt_path TEXT,
@@ -279,6 +280,7 @@ CREATE INDEX IF NOT EXISTS idx_loops_repo_path ON loops(repo_path);
 CREATE INDEX IF NOT EXISTS idx_loops_state ON loops(state);
 CREATE INDEX IF NOT EXISTS idx_loops_pool_id ON loops(pool_id);
 CREATE INDEX IF NOT EXISTS idx_loops_profile_id ON loops(profile_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_loops_short_id ON loops(short_id);
 
 -- LOOP QUEUE ITEMS TABLE
 CREATE TABLE IF NOT EXISTS loop_queue_items (

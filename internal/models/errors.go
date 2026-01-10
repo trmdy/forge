@@ -29,6 +29,7 @@ var (
 	// Loop errors
 	ErrInvalidLoopName     = errors.New("loop name is required")
 	ErrInvalidLoopRepoPath = errors.New("loop repo path is required")
+	ErrInvalidLoopShortID  = errors.New("loop short ID must be 6-9 alphanumeric characters")
 
 	// Profile errors
 	ErrInvalidProfileHarness = errors.New("profile harness is required")

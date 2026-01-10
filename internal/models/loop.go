@@ -19,6 +19,7 @@ const (
 // Loop represents a background agent loop tied to a repo.
 type Loop struct {
 	ID             string         `json:"id"`
+	ShortID        string         `json:"short_id"`
 	Name           string         `json:"name"`
 	RepoPath       string         `json:"repo_path"`
 	BasePromptPath string         `json:"base_prompt_path,omitempty"`
@@ -47,6 +48,9 @@ func (l *Loop) Validate() error {
 	if l.RepoPath == "" {
 		validation.Add("repo_path", ErrInvalidLoopRepoPath)
 	}
+	if !isValidLoopShortID(l.ShortID) {
+		validation.Add("short_id", ErrInvalidLoopShortID)
+	}
 	if l.IntervalSeconds < 0 {
 		validation.AddMessage("interval_seconds", "interval_seconds must be >= 0")
 	}
@@ -65,4 +69,23 @@ func (l *Loop) Validate() error {
 // DefaultLoopState returns the default loop state.
 func DefaultLoopState() LoopState {
 	return LoopStateStopped
+}
+
+func isValidLoopShortID(value string) bool {
+	if len(value) < 6 || len(value) > 9 {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
