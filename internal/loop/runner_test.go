@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tOgg1/forge/internal/config"
 	"github.com/tOgg1/forge/internal/db"
@@ -227,6 +228,133 @@ func TestRunnerStopQueueStopsLoop(t *testing.T) {
 	}
 	if len(runs) != 0 {
 		t.Fatalf("expected no runs, got %d", len(runs))
+	}
+
+	updated, err := loopRepo.Get(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("get loop: %v", err)
+	}
+	if updated.State != models.LoopStateStopped {
+		t.Fatalf("expected loop stopped, got %s", updated.State)
+	}
+}
+
+func TestRunnerMaxIterationsStopsLoop(t *testing.T) {
+	database, cleanup := testutil.NewTestDB(t)
+	defer cleanup()
+
+	repoDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = t.TempDir()
+	cfg.Global.ConfigDir = t.TempDir()
+
+	profileRepo := db.NewProfileRepository(database)
+	loopRepo := db.NewLoopRepository(database)
+	runRepo := db.NewLoopRunRepository(database)
+
+	profile := &models.Profile{
+		Name:            "iter-profile",
+		Harness:         models.HarnessPi,
+		PromptMode:      models.PromptModeEnv,
+		CommandTemplate: "pi -p \"$FORGE_PROMPT_CONTENT\"",
+		MaxConcurrency:  1,
+	}
+	if err := profileRepo.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	loopEntry := &models.Loop{
+		Name:            "loop-max-iter",
+		RepoPath:        repoDir,
+		BasePromptMsg:   "base",
+		IntervalSeconds: 0,
+		MaxIterations:   2,
+		ProfileID:       profile.ID,
+		State:           models.LoopStateStopped,
+	}
+	if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	runner := NewRunner(database, cfg)
+	runner.Exec = func(ctx context.Context, profile models.Profile, promptPath, promptContent, workDir string, output io.Writer) (int, string, error) {
+		return 0, "ok", nil
+	}
+
+	if err := runner.RunLoop(context.Background(), loopEntry.ID); err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+
+	runs, err := runRepo.ListByLoop(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(runs))
+	}
+
+	updated, err := loopRepo.Get(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("get loop: %v", err)
+	}
+	if updated.State != models.LoopStateStopped {
+		t.Fatalf("expected loop stopped, got %s", updated.State)
+	}
+}
+
+func TestRunnerMaxRuntimeStopsLoop(t *testing.T) {
+	database, cleanup := testutil.NewTestDB(t)
+	defer cleanup()
+
+	repoDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = t.TempDir()
+	cfg.Global.ConfigDir = t.TempDir()
+
+	profileRepo := db.NewProfileRepository(database)
+	loopRepo := db.NewLoopRepository(database)
+	runRepo := db.NewLoopRunRepository(database)
+
+	profile := &models.Profile{
+		Name:            "runtime-profile",
+		Harness:         models.HarnessPi,
+		PromptMode:      models.PromptModeEnv,
+		CommandTemplate: "pi -p \"$FORGE_PROMPT_CONTENT\"",
+		MaxConcurrency:  1,
+	}
+	if err := profileRepo.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	loopEntry := &models.Loop{
+		Name:              "loop-max-runtime",
+		RepoPath:          repoDir,
+		BasePromptMsg:     "base",
+		IntervalSeconds:   0,
+		MaxRuntimeSeconds: 1,
+		ProfileID:         profile.ID,
+		State:             models.LoopStateStopped,
+	}
+	if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	runner := NewRunner(database, cfg)
+	runner.Exec = func(ctx context.Context, profile models.Profile, promptPath, promptContent, workDir string, output io.Writer) (int, string, error) {
+		time.Sleep(1100 * time.Millisecond)
+		return 0, "ok", nil
+	}
+
+	if err := runner.RunLoop(context.Background(), loopEntry.ID); err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+
+	runs, err := runRepo.ListByLoop(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
 	}
 
 	updated, err := loopRepo.Get(context.Background(), loopEntry.ID)

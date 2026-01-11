@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,6 +102,16 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 		logWriter.WriteLine(fmt.Sprintf("warning: failed to record pid: %v", err))
 	}
 
+	maxIterations := loop.MaxIterations
+	maxRuntime := time.Duration(loop.MaxRuntimeSeconds) * time.Second
+	iterationCount := loopIterationCount(loop.Metadata)
+	startedAt := loopStartedAt(loop.Metadata)
+	if maxRuntime > 0 && startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+		setLoopStartedAt(loop, startedAt)
+		_ = loopRepo.Update(ctx, loop)
+	}
+
 	loop.State = models.LoopStateRunning
 	if err := loopRepo.Update(ctx, loop); err != nil {
 		return err
@@ -116,6 +127,24 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 			loop.State = models.LoopStateStopped
 			_ = loopRepo.Update(ctx, loop)
 			return ctx.Err()
+		}
+
+		if maxIterations > 0 && iterationCount >= maxIterations {
+			reason := fmt.Sprintf("max iterations reached (%d)", maxIterations)
+			logWriter.WriteLine(reason)
+			loop.State = models.LoopStateStopped
+			loop.LastError = reason
+			_ = loopRepo.Update(ctx, loop)
+			return nil
+		}
+
+		if maxRuntime > 0 && time.Since(startedAt) >= maxRuntime {
+			reason := fmt.Sprintf("max runtime reached (%s)", maxRuntime)
+			logWriter.WriteLine(reason)
+			loop.State = models.LoopStateStopped
+			loop.LastError = reason
+			_ = loopRepo.Update(ctx, loop)
+			return nil
 		}
 
 		plan, err := buildQueuePlan(ctx, queueRepo, loop.ID, pendingSteer)
@@ -246,6 +275,8 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 		loop.LastExitCode = run.ExitCode
 		loop.LastError = runResult.errText
 		loop.State = models.LoopStateSleeping
+		iterationCount++
+		setLoopIterationCount(loop, iterationCount)
 		_ = loopRepo.Update(ctx, loop)
 
 		_ = markQueueCompleted(ctx, queueRepo, plan.ConsumeItemIDs)
@@ -411,7 +442,70 @@ func (r *Runner) attachLoopPID(ctx context.Context, loop *models.Loop, repo *db.
 	}
 	loop.Metadata["pid"] = os.Getpid()
 	loop.Metadata["started_at"] = time.Now().UTC().Format(time.RFC3339)
+	loop.Metadata["iteration_count"] = 0
 	return repo.Update(ctx, loop)
+}
+
+func loopIterationCount(metadata map[string]any) int {
+	if metadata == nil {
+		return 0
+	}
+	value, ok := metadata["iteration_count"]
+	if !ok {
+		return 0
+	}
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		parsed, err := strconv.Atoi(v)
+		if err != nil {
+			return 0
+		}
+		return parsed
+	default:
+		return 0
+	}
+}
+
+func setLoopIterationCount(loop *models.Loop, count int) {
+	if loop.Metadata == nil {
+		loop.Metadata = make(map[string]any)
+	}
+	loop.Metadata["iteration_count"] = count
+}
+
+func loopStartedAt(metadata map[string]any) time.Time {
+	if metadata == nil {
+		return time.Time{}
+	}
+	value, ok := metadata["started_at"]
+	if !ok {
+		return time.Time{}
+	}
+	switch v := value.(type) {
+	case time.Time:
+		return v
+	case string:
+		parsed, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return time.Time{}
+		}
+		return parsed
+	default:
+		return time.Time{}
+	}
+}
+
+func setLoopStartedAt(loop *models.Loop, startedAt time.Time) {
+	if loop.Metadata == nil {
+		loop.Metadata = make(map[string]any)
+	}
+	loop.Metadata["started_at"] = startedAt.UTC().Format(time.RFC3339)
 }
 
 func (r *Runner) sleep(ctx context.Context, duration time.Duration) {
