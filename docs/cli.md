@@ -41,6 +41,16 @@ forge init --prompts-from ./prompts
 forge init --no-create-prompt
 ```
 
+### `forge config`
+
+Manage global configuration at `~/.config/forge/config.yaml`.
+
+```bash
+forge config init          # Create default config with comments
+forge config init --force  # Overwrite existing config
+forge config path          # Print config file path
+```
+
 ### `forge up`
 
 Start loop(s) in the current repo.
