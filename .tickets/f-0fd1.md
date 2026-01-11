@@ -1,6 +1,6 @@
 ---
 id: f-0fd1
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-01-10T20:06:26Z
@@ -30,3 +30,9 @@ Notes:
 - fmail does not require forge config files; it relies only on env vars and the filesystem
 - CLI skeleton is ready for standalone mode implementation (core package can be added next)
 
+
+## Notes
+
+**2026-01-11T06:49:58Z**
+
+Scaffolded cmd/fmail and internal/fmail skeleton; go run blocked by network (cobra download) in sandbox.
