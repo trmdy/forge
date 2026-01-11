@@ -5,29 +5,16 @@ import (
 	"math/rand"
 	"strings"
 	"time"
-)
 
-var (
-	loopAdjectives = []string{
-		"Agile", "Amped", "Atomic", "Beefy", "Bold", "Brisk", "Bright", "Brutal",
-		"Crisp", "Daring", "Electric", "Epic", "Ferocious", "Fierce", "Flashy", "Focused",
-		"Glorious", "Hyper", "Laser", "Legend", "Mighty", "Nimble", "Prime", "Rapid",
-		"Rugged", "Savage", "Sharp", "Slick", "Solid", "Stellar", "Turbo", "Ultra",
-	}
-	loopNames = []string{
-		"Homer", "Marge", "Bart", "Lisa", "Maggie", "Flanders", "Burns", "Smithers",
-		"Milhouse", "Krusty", "Apu", "Lenny", "Carl", "Moe", "Wiggum", "Nelson",
-	}
+	"github.com/tOgg1/forge/internal/names"
 )
 
 func generateLoopName(existing map[string]struct{}) string {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	maxAttempts := len(loopAdjectives) * len(loopNames) * 2
+	maxAttempts := names.LoopNameCountTwoPart() * 2
 
 	for i := 0; i < maxAttempts; i++ {
-		adjective := loopAdjectives[rng.Intn(len(loopAdjectives))]
-		name := loopNames[rng.Intn(len(loopNames))]
-		candidate := strings.TrimSpace(adjective + " " + name)
+		candidate := strings.TrimSpace(names.RandomLoopNameTwoPart(rng))
 		if candidate == "" {
 			continue
 		}
@@ -37,7 +24,19 @@ func generateLoopName(existing map[string]struct{}) string {
 		return candidate
 	}
 
-	fallback := "Loop " + time.Now().Format("150405")
+	maxAttempts = names.LoopNameCountThreePart() * 2
+	for i := 0; i < maxAttempts; i++ {
+		candidate := strings.TrimSpace(names.RandomLoopNameThreePart(rng))
+		if candidate == "" {
+			continue
+		}
+		if _, ok := existing[candidate]; ok {
+			continue
+		}
+		return candidate
+	}
+
+	fallback := "loop-" + time.Now().Format("150405")
 	if _, ok := existing[fallback]; !ok {
 		return fallback
 	}

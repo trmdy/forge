@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/tOgg1/forge/internal/names"
 )
 
 const registerMaxAttempts = 10
@@ -60,8 +63,21 @@ func runRegister(cmd *cobra.Command, args []string) error {
 }
 
 func registerGeneratedAgent(store *Store, host string) (*AgentRecord, error) {
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	for attempt := 0; attempt < registerMaxAttempts; attempt++ {
-		candidate := fmt.Sprintf("agent-%s", NewMessageID())
+		candidate := names.RandomLoopNameTwoPart(rng)
+		record, err := store.RegisterAgentRecord(candidate, host)
+		if err == nil {
+			return record, nil
+		}
+		if errors.Is(err, ErrAgentExists) {
+			continue
+		}
+		return nil, err
+	}
+
+	for attempt := 0; attempt < registerMaxAttempts; attempt++ {
+		candidate := names.RandomLoopNameThreePart(rng)
 		record, err := store.RegisterAgentRecord(candidate, host)
 		if err == nil {
 			return record, nil
