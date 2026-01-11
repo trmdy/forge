@@ -26,7 +26,7 @@ func newLogCmd() *cobra.Command {
 		Use:   "log [topic|@agent]",
 		Short: "View recent messages",
 		Args:  argsMax(1),
-		RunE:  runNotImplemented,
+		RunE:  runLog,
 	}
 	cmd.Flags().IntP("limit", "n", 20, "Max messages to show")
 	cmd.Flags().String("since", "", "Filter by time window")

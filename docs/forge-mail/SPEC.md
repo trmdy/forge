@@ -189,6 +189,8 @@ Options:
 --json          JSON output
 ```
 
+JSON output uses JSON Lines (one message per line).
+
 Note: `fmail log @$FMAIL_AGENT` shows your inbox.
 
 ### fmail watch
