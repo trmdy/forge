@@ -41,7 +41,7 @@ func newWatchCmd() *cobra.Command {
 		Use:   "watch [topic|@agent]",
 		Short: "Stream messages as they arrive",
 		Args:  argsMax(1),
-		RunE:  runNotImplemented,
+		RunE:  runWatch,
 	}
 	cmd.Flags().Duration("timeout", 0, "Maximum wait time before exiting")
 	cmd.Flags().IntP("count", "c", 0, "Exit after receiving N messages")
