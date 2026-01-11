@@ -54,7 +54,7 @@ func newWhoCmd() *cobra.Command {
 		Use:   "who",
 		Short: "List known agents",
 		Args:  argsMax(0),
-		RunE:  runNotImplemented,
+		RunE:  runWho,
 	}
 	cmd.Flags().Bool("json", false, "Output as JSON")
 	return cmd
@@ -65,7 +65,7 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status [message]",
 		Short: "Show or set your status",
 		Args:  argsMax(1),
-		RunE:  runNotImplemented,
+		RunE:  runStatus,
 	}
 	cmd.Flags().Bool("clear", false, "Clear your status")
 	return cmd
@@ -76,7 +76,7 @@ func newTopicsCmd() *cobra.Command {
 		Use:   "topics",
 		Short: "List topics with activity",
 		Args:  argsMax(0),
-		RunE:  runNotImplemented,
+		RunE:  runTopics,
 	}
 	cmd.Flags().Bool("json", false, "Output as JSON")
 	return cmd

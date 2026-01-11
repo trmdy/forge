@@ -1,6 +1,6 @@
 ---
 id: f-bfec
-status: open
+status: closed
 deps: [f-0fd1, f-c44a]
 links: []
 created: 2026-01-10T20:07:19Z
@@ -37,3 +37,9 @@ Commands:
 - `fmail who` output matches spec fields (human-readable + --json)
 - `fmail topics` reports accurate counts and last activity based on .fmail/topics/*
 
+
+## Notes
+
+**2026-01-11T07:22:14Z**
+
+Implemented agent registry access plus who/status/topics outputs, including topic summaries and status updates.
