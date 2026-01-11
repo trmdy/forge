@@ -11,8 +11,8 @@ import (
 
 	_ "modernc.org/sqlite" // Pure Go SQLite driver
 
-	"github.com/tOgg1/forge/internal/logging"
 	"github.com/rs/zerolog"
+	"github.com/tOgg1/forge/internal/logging"
 )
 
 //go:embed migrations/*.sql

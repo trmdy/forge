@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/tOgg1/forge/internal/tmux"
-	"github.com/rs/zerolog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"

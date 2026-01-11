@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/rs/zerolog"
+	"github.com/tOgg1/forge/gen/forged/v1"
 )
 
 // ResourceLimits defines the resource limits for an agent.

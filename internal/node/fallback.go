@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	forgedv1 "github.com/tOgg1/forge/gen/forged/v1"
+	"github.com/tOgg1/forge/internal/forged"
 	"github.com/tOgg1/forge/internal/models"
 	"github.com/tOgg1/forge/internal/ssh"
-	"github.com/tOgg1/forge/internal/forged"
-	"github.com/rs/zerolog"
 )
 
 // ExecutionMode indicates how commands are being executed on a node.

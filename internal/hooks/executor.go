@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/tOgg1/forge/internal/logging"
 	"github.com/tOgg1/forge/internal/models"
-	"github.com/rs/zerolog"
 )
 
 // Executor runs hook actions for incoming events.

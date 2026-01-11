@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tOgg1/forge/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tOgg1/forge/internal/models"
 )
 
 // TestDetectBasicState tests the fallback state detection heuristics.

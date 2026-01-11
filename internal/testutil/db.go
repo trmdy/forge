@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/tOgg1/forge/internal/db"
 	"github.com/stretchr/testify/require"
+	"github.com/tOgg1/forge/internal/db"
 )
 
 // NewTestDB creates an in-memory SQLite database for testing.

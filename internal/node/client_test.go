@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/tOgg1/forge/internal/models"
 	"github.com/tOgg1/forge/internal/ssh"
 	"github.com/tOgg1/forge/internal/testutil/mocks"
-	"github.com/rs/zerolog"
 )
 
 // mockSSHExecutorFunc returns a function that creates mock SSH executors.

@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/tOgg1/forge/internal/logging"
 	"github.com/tOgg1/forge/internal/models"
-	"github.com/rs/zerolog"
 )
 
 // OpenCodeEvent represents a parsed event from the OpenCode SSE stream.

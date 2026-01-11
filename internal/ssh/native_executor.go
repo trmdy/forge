@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tOgg1/forge/internal/logging"
 	"github.com/rs/zerolog"
+	"github.com/tOgg1/forge/internal/logging"
 	xssh "golang.org/x/crypto/ssh"
 )
 

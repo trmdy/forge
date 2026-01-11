@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/tOgg1/forge/internal/events"
 	"github.com/tOgg1/forge/internal/logging"
 	"github.com/tOgg1/forge/internal/models"
-	"github.com/rs/zerolog"
 )
 
 // Manager wires stored hooks into an event publisher.

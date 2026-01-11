@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	forgedv1 "github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/tOgg1/forge/internal/config"
-	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 )
 

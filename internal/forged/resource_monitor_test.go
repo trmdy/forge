@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/rs/zerolog"
+	"github.com/tOgg1/forge/gen/forged/v1"
 )
 
 func TestDefaultResourceLimits(t *testing.T) {

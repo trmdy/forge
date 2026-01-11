@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/tOgg1/forge/internal/models"
 	"github.com/tOgg1/forge/internal/ssh"
-	"github.com/rs/zerolog"
 )
 
 // mockExecutor is a mock SSH executor for testing.

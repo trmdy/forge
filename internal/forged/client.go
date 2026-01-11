@@ -7,9 +7,9 @@ import (
 	"net"
 	"sync"
 
+	"github.com/rs/zerolog"
 	forgedv1 "github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/tOgg1/forge/internal/ssh"
-	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

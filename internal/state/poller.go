@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/logging"
 	"github.com/tOgg1/forge/internal/models"
-	"github.com/rs/zerolog"
 )
 
 // Poller errors.

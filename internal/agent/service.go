@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/tOgg1/forge/internal/account"
 	"github.com/tOgg1/forge/internal/adapters"
 	"github.com/tOgg1/forge/internal/db"
@@ -18,7 +19,6 @@ import (
 	"github.com/tOgg1/forge/internal/models"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/tOgg1/forge/internal/workspace"
-	"github.com/rs/zerolog"
 )
 
 // Service errors.

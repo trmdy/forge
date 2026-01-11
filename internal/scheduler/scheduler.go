@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/tOgg1/forge/internal/account"
 	"github.com/tOgg1/forge/internal/agent"
 	"github.com/tOgg1/forge/internal/events"
@@ -18,7 +19,6 @@ import (
 	"github.com/tOgg1/forge/internal/models"
 	"github.com/tOgg1/forge/internal/queue"
 	"github.com/tOgg1/forge/internal/state"
-	"github.com/rs/zerolog"
 )
 
 // Scheduler errors.

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/tOgg1/forge/internal/adapters"
 	"github.com/tOgg1/forge/internal/agent"
 	"github.com/tOgg1/forge/internal/models"
@@ -13,7 +14,6 @@ import (
 	"github.com/tOgg1/forge/internal/state"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/tOgg1/forge/internal/workspace"
-	"github.com/stretchr/testify/require"
 )
 
 // AgentTestEnv provides a complete environment for testing agent operations.
