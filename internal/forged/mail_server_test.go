@@ -22,6 +22,12 @@ func skipNetworkTest(t *testing.T) {
 func TestMailServerSendWatch(t *testing.T) {
 	skipNetworkTest(t)
 
+	originalInterval := mailPresenceInterval
+	mailPresenceInterval = 50 * time.Millisecond
+	t.Cleanup(func() {
+		mailPresenceInterval = originalInterval
+	})
+
 	root := t.TempDir()
 	projectID, err := fmail.DeriveProjectID(root)
 	if err != nil {
@@ -71,6 +77,28 @@ func TestMailServerSendWatch(t *testing.T) {
 		t.Fatalf("watch ack failed: %+v", watchAck)
 	}
 
+	store, err := fmail.NewStore(root)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	record, err := store.ReadAgentRecord("watcher")
+	if err != nil {
+		t.Fatalf("read agent record: %v", err)
+	}
+	if record.LastSeen.IsZero() {
+		t.Fatalf("expected last_seen to be set")
+	}
+	initialSeen := record.LastSeen
+
+	time.Sleep(2*mailPresenceInterval + 20*time.Millisecond)
+	record, err = store.ReadAgentRecord("watcher")
+	if err != nil {
+		t.Fatalf("read agent record after heartbeat: %v", err)
+	}
+	if !record.LastSeen.After(initialSeen) {
+		t.Fatalf("expected last_seen to advance, got %v <= %v", record.LastSeen, initialSeen)
+	}
+
 	sendConn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatalf("dial send: %v", err)
@@ -117,10 +145,6 @@ func TestMailServerSendWatch(t *testing.T) {
 		t.Fatalf("expected host to be set")
 	}
 
-	store, err := fmail.NewStore(root)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
 	messages, err := store.ListTopicMessages("task")
 	if err != nil {
 		t.Fatalf("list messages: %v", err)

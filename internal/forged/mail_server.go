@@ -28,7 +28,8 @@ const (
 )
 
 var (
-	errBackpressure = errors.New("backpressure")
+	errBackpressure      = errors.New("backpressure")
+	mailPresenceInterval = 5 * time.Second
 )
 
 type mailServer struct {
@@ -195,6 +196,8 @@ func (s *mailServer) handleWatch(conn net.Conn, line []byte, base mailBaseReques
 		_ = writeMailError(conn, base.ReqID, "internal", "update agent registry failed")
 		return
 	}
+	stopPresence := hub.trackPresence(base.Agent, base.Host)
+	defer stopPresence()
 
 	if req.Agent != "" && strings.ToLower(strings.TrimSpace(req.Agent)) != base.Agent {
 		_ = writeMailError(conn, base.ReqID, "invalid_request", "agent mismatch")
@@ -319,10 +322,12 @@ func (s *mailServer) getHub(project mailProject) (*mailHub, error) {
 	}
 
 	hub := &mailHub{
-		project: mailProject{ID: id, Root: absRoot},
-		store:   store,
-		host:    s.host,
-		subs:    make(map[string]*mailSubscriber),
+		project:  mailProject{ID: id, Root: absRoot},
+		store:    store,
+		host:     s.host,
+		logger:   s.logger,
+		subs:     make(map[string]*mailSubscriber),
+		presence: make(map[mailPresenceKey]*mailPresenceTracker),
 	}
 
 	s.mu.Lock()
@@ -338,10 +343,80 @@ type mailHub struct {
 	project mailProject
 	store   *fmail.Store
 	host    string
+	logger  zerolog.Logger
 
 	mu   sync.RWMutex
 	subs map[string]*mailSubscriber
 	seq  uint64
+
+	presenceMu sync.Mutex
+	presence   map[mailPresenceKey]*mailPresenceTracker
+}
+
+type mailPresenceKey struct {
+	agent string
+	host  string
+}
+
+type mailPresenceTracker struct {
+	agent string
+	host  string
+	refs  int
+	stop  chan struct{}
+}
+
+func (h *mailHub) trackPresence(agent, host string) func() {
+	key := mailPresenceKey{agent: agent, host: host}
+
+	h.presenceMu.Lock()
+	tracker, ok := h.presence[key]
+	if ok {
+		tracker.refs++
+		h.presenceMu.Unlock()
+		return func() { h.untrackPresence(key) }
+	}
+	tracker = &mailPresenceTracker{
+		agent: agent,
+		host:  host,
+		refs:  1,
+		stop:  make(chan struct{}),
+	}
+	h.presence[key] = tracker
+	h.presenceMu.Unlock()
+
+	go h.runPresence(tracker)
+	return func() { h.untrackPresence(key) }
+}
+
+func (h *mailHub) untrackPresence(key mailPresenceKey) {
+	h.presenceMu.Lock()
+	tracker, ok := h.presence[key]
+	if !ok {
+		h.presenceMu.Unlock()
+		return
+	}
+	tracker.refs--
+	if tracker.refs <= 0 {
+		delete(h.presence, key)
+		close(tracker.stop)
+	}
+	h.presenceMu.Unlock()
+}
+
+func (h *mailHub) runPresence(tracker *mailPresenceTracker) {
+	ticker := time.NewTicker(mailPresenceInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-tracker.stop:
+			return
+		case <-ticker.C:
+			if _, err := h.store.UpdateAgentRecord(tracker.agent, tracker.host); err != nil {
+				h.logger.Warn().Err(err).Str("agent", tracker.agent).Msg("mail presence update failed")
+			}
+		}
+	}
 }
 
 func (h *mailHub) subscribe(target mailWatchTarget, since sinceFilter) *mailSubscriber {
