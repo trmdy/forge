@@ -37,6 +37,7 @@ This creates:
   - .forge/sequences/
   - .forge/ledgers/
 
+Also ensures .fmail/ is in .gitignore (runtime messaging state).
 Optionally creates PROMPT.md if missing.`,
 	Example: `  forge init
   forge init --prompts-from ./prompts
@@ -91,6 +92,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		created = append(created, copied...)
+	}
+
+	// Ensure .fmail/ is gitignored (runtime messaging state)
+	gitignorePath := filepath.Join(repoPath, ".gitignore")
+	if addedGitignore, err := ensureGitignoreEntry(gitignorePath, ".fmail/"); err != nil {
+		return err
+	} else if addedGitignore {
+		created = append(created, gitignorePath+" (.fmail/ entry)")
 	}
 
 	promptPath := filepath.Join(repoPath, "PROMPT.md")
@@ -191,6 +200,62 @@ func copyPromptDir(srcDir, destDir string) ([]string, error) {
 	}
 
 	return created, nil
+}
+
+// ensureGitignoreEntry appends an entry to .gitignore if not already present.
+// Returns true if the entry was added, false if already present or file doesn't exist.
+func ensureGitignoreEntry(gitignorePath, entry string) (bool, error) {
+	content, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No .gitignore exists, create one with the entry
+			if err := os.WriteFile(gitignorePath, []byte(entry+"\n"), 0644); err != nil {
+				return false, fmt.Errorf("failed to create .gitignore: %w", err)
+			}
+			return true, nil
+		}
+		return false, fmt.Errorf("failed to read .gitignore: %w", err)
+	}
+
+	// Check if entry already exists (exact line match)
+	lines := splitLines(string(content))
+	for _, line := range lines {
+		if line == entry {
+			return false, nil
+		}
+	}
+
+	// Append entry with proper newline handling
+	newContent := string(content)
+	if len(newContent) > 0 && newContent[len(newContent)-1] != '\n' {
+		newContent += "\n"
+	}
+	newContent += entry + "\n"
+
+	if err := os.WriteFile(gitignorePath, []byte(newContent), 0644); err != nil {
+		return false, fmt.Errorf("failed to update .gitignore: %w", err)
+	}
+	return true, nil
+}
+
+// splitLines splits content into lines, handling both \n and \r\n.
+func splitLines(content string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(content); i++ {
+		if content[i] == '\n' {
+			line := content[start:i]
+			if len(line) > 0 && line[len(line)-1] == '\r' {
+				line = line[:len(line)-1]
+			}
+			lines = append(lines, line)
+			start = i + 1
+		}
+	}
+	if start < len(content) {
+		lines = append(lines, content[start:])
+	}
+	return lines
 }
 
 const defaultForgeConfig = `# Forge loop config
