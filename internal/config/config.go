@@ -302,9 +302,9 @@ func DefaultConfig() *Config {
 			Format:       "console",
 			EnableCaller: false,
 		},
-		Accounts: []AccountConfig{},
-		Profiles: []ProfileConfig{},
-		Pools:    []PoolConfig{},
+		Accounts:    []AccountConfig{},
+		Profiles:    []ProfileConfig{},
+		Pools:       []PoolConfig{},
 		DefaultPool: "",
 		NodeDefaults: NodeConfig{
 			SSHBackend:          models.SSHBackendAuto,

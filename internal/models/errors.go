@@ -32,7 +32,7 @@ var (
 	ErrInvalidLoopShortID  = errors.New("loop short ID must be 6-9 alphanumeric characters")
 
 	// Profile errors
-	ErrInvalidProfileHarness = errors.New("profile harness is required")
+	ErrInvalidProfileHarness  = errors.New("profile harness is required")
 	ErrInvalidCommandTemplate = errors.New("command template is required")
 
 	// Pool errors

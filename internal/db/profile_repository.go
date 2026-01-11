@@ -253,24 +253,24 @@ func (r *ProfileRepository) SetCooldown(ctx context.Context, id string, until *t
 	return nil
 }
 
-func (r *ProfileRepository) scanProfile(scanner interface{
+func (r *ProfileRepository) scanProfile(scanner interface {
 	Scan(...any) error
 }) (*models.Profile, error) {
 	var (
-		id             string
-		name           string
-		harness        string
-		authKind       sql.NullString
-		authHome       sql.NullString
-		promptMode     string
+		id              string
+		name            string
+		harness         string
+		authKind        sql.NullString
+		authHome        sql.NullString
+		promptMode      string
 		commandTemplate string
-		model          sql.NullString
-		extraArgsJSON  sql.NullString
-		envJSON        sql.NullString
-		maxConcurrency int
-		cooldownUntil  sql.NullString
-		createdAt      string
-		updatedAt      string
+		model           sql.NullString
+		extraArgsJSON   sql.NullString
+		envJSON         sql.NullString
+		maxConcurrency  int
+		cooldownUntil   sql.NullString
+		createdAt       string
+		updatedAt       string
 	)
 
 	if err := scanner.Scan(
@@ -296,15 +296,15 @@ func (r *ProfileRepository) scanProfile(scanner interface{
 	}
 
 	profile := &models.Profile{
-		ID:             id,
-		Name:           name,
-		Harness:        models.Harness(harness),
-		AuthKind:       authKind.String,
-		AuthHome:       authHome.String,
-		PromptMode:     models.PromptMode(promptMode),
+		ID:              id,
+		Name:            name,
+		Harness:         models.Harness(harness),
+		AuthKind:        authKind.String,
+		AuthHome:        authHome.String,
+		PromptMode:      models.PromptMode(promptMode),
 		CommandTemplate: commandTemplate,
-		Model:          model.String,
-		MaxConcurrency: maxConcurrency,
+		Model:           model.String,
+		MaxConcurrency:  maxConcurrency,
 	}
 
 	if extraArgsJSON.Valid && extraArgsJSON.String != "" {

@@ -27,20 +27,20 @@ const (
 
 // Profile represents a harness+auth combination.
 type Profile struct {
-	ID             string            `json:"id"`
-	Name           string            `json:"name"`
-	Harness        Harness           `json:"harness"`
-	AuthKind       string            `json:"auth_kind,omitempty"`
-	AuthHome       string            `json:"auth_home,omitempty"`
-	PromptMode     PromptMode        `json:"prompt_mode"`
-	CommandTemplate string           `json:"command_template"`
-	Model          string            `json:"model,omitempty"`
-	ExtraArgs      []string          `json:"extra_args,omitempty"`
-	Env            map[string]string `json:"env,omitempty"`
-	MaxConcurrency int               `json:"max_concurrency"`
-	CooldownUntil  *time.Time        `json:"cooldown_until,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
-	UpdatedAt      time.Time         `json:"updated_at"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	Harness         Harness           `json:"harness"`
+	AuthKind        string            `json:"auth_kind,omitempty"`
+	AuthHome        string            `json:"auth_home,omitempty"`
+	PromptMode      PromptMode        `json:"prompt_mode"`
+	CommandTemplate string            `json:"command_template"`
+	Model           string            `json:"model,omitempty"`
+	ExtraArgs       []string          `json:"extra_args,omitempty"`
+	Env             map[string]string `json:"env,omitempty"`
+	MaxConcurrency  int               `json:"max_concurrency"`
+	CooldownUntil   *time.Time        `json:"cooldown_until,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 // Validate checks if the profile configuration is valid.

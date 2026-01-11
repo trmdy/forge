@@ -17,7 +17,7 @@ const (
 	LoopQueueItemPause              LoopQueueItemType = "pause"
 	LoopQueueItemStopGraceful       LoopQueueItemType = "stop_graceful"
 	LoopQueueItemKillNow            LoopQueueItemType = "kill_now"
-	LoopQueueItemSteerMessage        LoopQueueItemType = "steer_message"
+	LoopQueueItemSteerMessage       LoopQueueItemType = "steer_message"
 )
 
 // LoopQueueItemStatus represents the status of a loop queue item.
@@ -33,17 +33,17 @@ const (
 
 // LoopQueueItem represents an item in a loop's queue.
 type LoopQueueItem struct {
-	ID          string             `json:"id"`
-	LoopID      string             `json:"loop_id"`
-	Type        LoopQueueItemType  `json:"type"`
-	Position    int                `json:"position"`
-	Status      LoopQueueItemStatus `json:"status"`
-	Attempts    int                `json:"attempts"`
-	Payload     json.RawMessage    `json:"payload"`
-	CreatedAt   time.Time          `json:"created_at"`
-	DispatchedAt *time.Time        `json:"dispatched_at,omitempty"`
-	CompletedAt  *time.Time        `json:"completed_at,omitempty"`
-	Error       string             `json:"error,omitempty"`
+	ID           string              `json:"id"`
+	LoopID       string              `json:"loop_id"`
+	Type         LoopQueueItemType   `json:"type"`
+	Position     int                 `json:"position"`
+	Status       LoopQueueItemStatus `json:"status"`
+	Attempts     int                 `json:"attempts"`
+	Payload      json.RawMessage     `json:"payload"`
+	CreatedAt    time.Time           `json:"created_at"`
+	DispatchedAt *time.Time          `json:"dispatched_at,omitempty"`
+	CompletedAt  *time.Time          `json:"completed_at,omitempty"`
+	Error        string              `json:"error,omitempty"`
 }
 
 // MessageAppendPayload appends a message to the prompt.

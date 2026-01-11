@@ -17,21 +17,21 @@ import (
 )
 
 const (
-	archiveSchemaVersion    = 1
-	archiveEventPageSize    = 250
-	archiveEventLimit       = 5000
-	defaultArchiveAfter     = 24 * time.Hour
+	archiveSchemaVersion = 1
+	archiveEventPageSize = 250
+	archiveEventLimit    = 5000
+	defaultArchiveAfter  = 24 * time.Hour
 )
 
 type agentArchive struct {
-	Version        int                 `json:"version"`
-	ArchivedAt     time.Time           `json:"archived_at"`
-	Agent          *models.Agent       `json:"agent"`
-	Workspace      *models.Workspace   `json:"workspace,omitempty"`
-	Transcript     *archiveTranscript  `json:"transcript,omitempty"`
-	Events         []*models.Event     `json:"events,omitempty"`
-	EventsTruncated bool               `json:"events_truncated,omitempty"`
-	Errors         *archiveErrorReport `json:"errors,omitempty"`
+	Version         int                 `json:"version"`
+	ArchivedAt      time.Time           `json:"archived_at"`
+	Agent           *models.Agent       `json:"agent"`
+	Workspace       *models.Workspace   `json:"workspace,omitempty"`
+	Transcript      *archiveTranscript  `json:"transcript,omitempty"`
+	Events          []*models.Event     `json:"events,omitempty"`
+	EventsTruncated bool                `json:"events_truncated,omitempty"`
+	Errors          *archiveErrorReport `json:"errors,omitempty"`
 }
 
 type archiveTranscript struct {
@@ -89,11 +89,11 @@ func (s *Service) archiveAgentLogs(ctx context.Context, agent *models.Agent, tra
 	events, eventsTruncated, eventsErr := s.collectAgentEvents(ctx, agent.ID)
 
 	payload := &agentArchive{
-		Version:        archiveSchemaVersion,
-		ArchivedAt:     time.Now().UTC(),
-		Agent:          agent,
-		Workspace:      ws,
-		Events:         events,
+		Version:         archiveSchemaVersion,
+		ArchivedAt:      time.Now().UTC(),
+		Agent:           agent,
+		Workspace:       ws,
+		Events:          events,
 		EventsTruncated: eventsTruncated,
 	}
 
