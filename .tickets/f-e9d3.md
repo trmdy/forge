@@ -1,6 +1,6 @@
 ---
 id: f-e9d3
-status: open
+status: closed
 deps: [f-c44a, f-cd1f, f-e081, f-5633, f-bfec, f-76d0, f-074a, f-e441, f-c648]
 links: []
 created: 2026-01-10T20:10:57Z
@@ -33,3 +33,9 @@ Notes:
 - Tests cover connected send/watch (server + client)
 - Tests are stable (no flakiness from timing; use deterministic timeouts)
 
+
+## Notes
+
+**2026-01-11T08:53:20Z**
+
+Added fmail integration tests for standalone send/log/watch/DM/since and connected send/watch via unix socket; included concurrent SaveMessage ID uniqueness.
