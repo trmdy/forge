@@ -70,6 +70,8 @@ type Daemon struct {
 	grpcServer      *grpc.Server
 	rateLimiter     *RateLimiter
 	resourceMonitor *ResourceMonitor
+	mailServer      *mailServer
+	mailListeners   []mailListener
 
 	// Database and repositories
 	database  *db.DB
@@ -207,6 +209,7 @@ func New(cfg *config.Config, logger zerolog.Logger, opts Options) (*Daemon, erro
 
 	// Create the gRPC service implementation
 	server := NewServer(logger, WithVersion(opts.Version))
+	mailServer := newMailServer(logger)
 
 	// Create rate limiter with options
 	var rlOpts []RateLimiterOption
@@ -283,6 +286,7 @@ func New(cfg *config.Config, logger zerolog.Logger, opts Options) (*Daemon, erro
 		grpcServer:      grpcServer,
 		rateLimiter:     rateLimiter,
 		resourceMonitor: resourceMonitor,
+		mailServer:      mailServer,
 		database:        database,
 		agentRepo:       agentRepo,
 		queueRepo:       queueRepo,
@@ -344,13 +348,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	// Start gRPC server in a goroutine
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 8)
 	go func() {
 		if err := d.grpcServer.Serve(listener); err != nil {
 			errCh <- err
 		}
-		close(errCh)
 	}()
+
+	if err := d.startMailServers(errCh); err != nil {
+		d.shutdown()
+		return err
+	}
 
 	// Wait for shutdown signal or error
 	select {
@@ -360,7 +368,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	case err := <-errCh:
 		if err != nil {
 			d.shutdown()
-			return fmt.Errorf("gRPC server error: %w", err)
+			return fmt.Errorf("server error: %w", err)
 		}
 	}
 
@@ -369,7 +377,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 }
 
 // shutdown performs ordered cleanup of all daemon components.
-// Shutdown order: scheduler -> event watcher -> state poller -> gRPC server -> resource monitor -> database
+// Shutdown order: scheduler -> event watcher -> state poller -> gRPC server -> mail servers -> resource monitor -> database
 func (d *Daemon) shutdown() {
 	// 1. Stop scheduler first (waits for in-progress dispatches)
 	if d.scheduler != nil {
@@ -401,14 +409,19 @@ func (d *Daemon) shutdown() {
 	d.grpcServer.GracefulStop()
 	d.logger.Debug().Msg("gRPC server stopped")
 
-	// 5. Stop resource monitor
+	// 5. Stop mail servers
+	d.logger.Debug().Msg("stopping mail servers...")
+	d.shutdownMailServers()
+	d.logger.Debug().Msg("mail servers stopped")
+
+	// 6. Stop resource monitor
 	if d.resourceMonitor != nil {
 		d.logger.Debug().Msg("stopping resource monitor...")
 		d.resourceMonitor.Stop()
 		d.logger.Debug().Msg("resource monitor stopped")
 	}
 
-	// 6. Close database
+	// 7. Close database
 	if d.database != nil {
 		d.logger.Debug().Msg("closing database...")
 		if err := d.database.Close(); err != nil {
