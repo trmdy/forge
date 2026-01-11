@@ -94,6 +94,14 @@ forge kill review-loop
 forge stop --pool default
 ```
 
+### `forge resume`
+
+Resume a stopped or errored loop.
+
+```bash
+forge resume review-loop
+```
+
 ### `forge rm`
 
 Remove loop records (DB only). Logs and ledgers remain on disk. Use `--force` for selectors or running loops.
