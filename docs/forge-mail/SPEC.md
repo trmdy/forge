@@ -42,7 +42,8 @@ Project Root: /home/user/my-app   (local path)
 
 When you run `fmail` in a directory, it finds the project by:
 1. Looking for `.fmail/` directory walking upward
-2. Looking for `.git/` directory (git root becomes project root)
+2. Looking for `.git/` directory (git root becomes project root). If `.git` is a file
+   pointing to a worktree, fmail uses the main worktree root instead.
 3. Using current directory
 
 The **project ID** is:
