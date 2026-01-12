@@ -30,7 +30,6 @@ func newLogCmd() *cobra.Command {
 		RunE:  runLog,
 	}
 	cmd.Flags().IntP("limit", "n", 20, "Max messages to show")
-	cmd.Flags().String("after", "", "Return messages after this message ID")
 	cmd.Flags().String("since", "", "Filter by time window")
 	cmd.Flags().String("from", "", "Filter by sender")
 	cmd.Flags().BoolP("follow", "f", false, "Stream new messages")
@@ -48,8 +47,6 @@ func newWatchCmd() *cobra.Command {
 	}
 	cmd.Flags().Duration("timeout", 0, "Maximum wait time before exiting")
 	cmd.Flags().IntP("count", "c", 0, "Exit after receiving N messages")
-	cmd.Flags().String("after", "", "Return messages after this message ID")
-	cmd.Flags().String("since", "", "Filter by time window")
 	cmd.Flags().Bool("allow-other-dm", false, "Allow watching another agent's DM inbox")
 	cmd.Flags().Bool("json", false, "Output as JSON")
 	return cmd

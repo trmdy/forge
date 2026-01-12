@@ -53,7 +53,6 @@ type mailSendRequest struct {
 
 type mailWatchRequest struct {
 	mailBaseRequest
-	After string `json:"after,omitempty"`
 	Topic string `json:"topic,omitempty"`
 	Since string `json:"since,omitempty"`
 }

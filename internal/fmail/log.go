@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -13,12 +12,9 @@ import (
 )
 
 type logFilter struct {
-	after string
 	since *time.Time
 	from  string
 }
-
-var messageIDPattern = regexp.MustCompile(`^\d{8}-\d{6}-\d{4}$`)
 
 func runLog(cmd *cobra.Command, args []string) error {
 	runtime, err := EnsureRuntime(cmd)
@@ -43,18 +39,10 @@ func runLog(cmd *cobra.Command, args []string) error {
 	if limit < 0 {
 		return usageError(cmd, "limit must be >= 0")
 	}
-	afterFlag, _ := cmd.Flags().GetString("after")
-	after, err := parseAfter(afterFlag)
+	sinceFlag, _ := cmd.Flags().GetString("since")
+	since, err := parseSince(sinceFlag, time.Now().UTC())
 	if err != nil {
-		return usageError(cmd, "invalid --after value: %v", err)
-	}
-	var since *time.Time
-	if after == "" {
-		sinceFlag, _ := cmd.Flags().GetString("since")
-		since, err = parseSince(sinceFlag, time.Now().UTC())
-		if err != nil {
-			return usageError(cmd, "invalid --since value: %v", err)
-		}
+		return usageError(cmd, "invalid --since value: %v", err)
 	}
 	fromFlag, _ := cmd.Flags().GetString("from")
 	from, err := normalizeFromFilter(fromFlag)
@@ -62,7 +50,6 @@ func runLog(cmd *cobra.Command, args []string) error {
 		return usageError(cmd, "invalid --from value: %v", err)
 	}
 	filter := logFilter{
-		after: after,
 		since: since,
 		from:  from,
 	}
@@ -167,11 +154,6 @@ func (f logFilter) match(message *Message) bool {
 	if f.from != "" && !strings.EqualFold(message.From, f.from) {
 		return false
 	}
-	if f.after != "" {
-		if message.ID == "" || message.ID <= f.after {
-			return false
-		}
-	}
 	if f.since != nil {
 		if message.Time.IsZero() || message.Time.Before(*f.since) {
 			return false
@@ -248,17 +230,6 @@ func parseSince(value string, now time.Time) (*time.Time, error) {
 		return &utc, nil
 	}
 	return nil, fmt.Errorf("use duration like '1h' or timestamp like '2024-01-15T10:30:00Z'")
-}
-
-func parseAfter(value string) (string, error) {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return "", nil
-	}
-	if !messageIDPattern.MatchString(trimmed) {
-		return "", fmt.Errorf("expected id format YYYYMMDD-HHMMSS-NNNN")
-	}
-	return trimmed, nil
 }
 
 func parseDurationWithDays(value string) (time.Duration, error) {

@@ -1,6 +1,6 @@
 ---
 id: f-de22
-status: closed
+status: open
 deps: []
 links: []
 created: 2026-01-11T17:50:44Z

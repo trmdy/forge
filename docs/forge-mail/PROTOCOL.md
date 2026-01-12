@@ -144,7 +144,6 @@ Subscribe to a stream of new messages.
   "agent": "architect",
   "host": "build-server",
   "topic": "task",
-  "after": "20260110-152500-0003",
   "since": "2026-01-10T15:00:00Z",
   "req_id": "w1"
 }
@@ -158,9 +157,6 @@ Rules:
 - `since` is optional. If present, the server should send any messages newer
   than `since` before entering live stream mode. `since` may be a message ID
   (`YYYYMMDD-HHMMSS-NNNN`) or RFC3339 timestamp.
-- `after` is optional. If present, the server should send any messages with IDs
-  strictly greater than `after` before entering live stream mode.
-- If both `after` and `since` are provided, `after` takes precedence.
 
 ### Response (ack)
 

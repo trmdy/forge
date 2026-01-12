@@ -86,53 +86,6 @@ func TestStandaloneWatchReceivesMessage(t *testing.T) {
 	require.Equal(t, "ping", messages[0].Body)
 }
 
-func TestStandaloneWatchAfter(t *testing.T) {
-	t.Setenv(EnvProject, "proj-test")
-	root := t.TempDir()
-
-	store, err := NewStore(root)
-	require.NoError(t, err)
-
-	older := time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)
-	newer := time.Date(2026, 1, 10, 13, 0, 0, 0, time.UTC)
-
-	firstID, err := store.SaveMessage(&Message{
-		From: "alice",
-		To:   "task",
-		Time: older,
-		Body: "old",
-	})
-	require.NoError(t, err)
-	_, err = store.SaveMessage(&Message{
-		From: "alice",
-		To:   "task",
-		Time: newer,
-		Body: "new",
-	})
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	var out bytes.Buffer
-	opts := watchOptions{
-		count:      1,
-		jsonOutput: true,
-		deadline:   time.Now().Add(2 * time.Second),
-	}
-	target := watchTarget{mode: watchTopic, name: "task"}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- watchStandalone(ctx, store, target, opts, time.Time{}, messageSince{id: firstID}, &out)
-	}()
-
-	require.NoError(t, <-errCh)
-	messages := parseJSONMessages(t, out.String())
-	require.Len(t, messages, 1)
-	require.Equal(t, "new", messages[0].Body)
-}
-
 func TestStandaloneDMInbox(t *testing.T) {
 	t.Setenv(EnvProject, "proj-test")
 	root := t.TempDir()
@@ -204,41 +157,6 @@ func TestStandaloneLogSince(t *testing.T) {
 	require.NoError(t, err)
 
 	flags := map[string]string{"since": "2026-01-10T12:30:00Z"}
-	messages := runLogJSON(t, runtime, []string{"task"}, flags)
-	require.Len(t, messages, 1)
-	require.Equal(t, "new", messages[0].Body)
-}
-
-func TestStandaloneLogAfter(t *testing.T) {
-	t.Setenv(EnvProject, "proj-test")
-	root := t.TempDir()
-	runtime := &Runtime{Root: root, Agent: "alice"}
-
-	store, err := NewStore(root)
-	require.NoError(t, err)
-
-	older := time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)
-	newer := time.Date(2026, 1, 10, 13, 0, 0, 0, time.UTC)
-
-	firstID, err := store.SaveMessage(&Message{
-		From: "alice",
-		To:   "task",
-		Time: older,
-		Body: "old",
-	})
-	require.NoError(t, err)
-	_, err = store.SaveMessage(&Message{
-		From: "alice",
-		To:   "task",
-		Time: newer,
-		Body: "new",
-	})
-	require.NoError(t, err)
-
-	flags := map[string]string{
-		"after": firstID,
-		"since": "2030-01-01T00:00:00Z",
-	}
 	messages := runLogJSON(t, runtime, []string{"task"}, flags)
 	require.Len(t, messages, 1)
 	require.Equal(t, "new", messages[0].Body)

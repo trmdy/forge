@@ -49,16 +49,16 @@ func robotHelp(version string) robotHelpPayload {
 				},
 			},
 			"log": {
-				Usage: "fmail log [topic|@agent] [-n N] [--after ID] [--since TIME]",
-				Flags: []string{"-n LIMIT", "--after ID", "--since TIME", "--from AGENT", "--json", "-f/--follow", "--allow-other-dm"},
+				Usage: "fmail log [topic|@agent] [-n N] [--since TIME]",
+				Flags: []string{"-n LIMIT", "--since TIME", "--from AGENT", "--json", "-f/--follow", "--allow-other-dm"},
 				Examples: []string{
 					"fmail log task -n 5",
 					"fmail log @$FMAIL_AGENT --since 1h",
 				},
 			},
 			"watch": {
-				Usage: "fmail watch [topic|@agent] [--timeout T] [--count N] [--after ID] [--since TIME]",
-				Flags: []string{"--timeout DURATION", "--count N", "--after ID", "--since TIME", "--json", "--allow-other-dm"},
+				Usage: "fmail watch [topic|@agent] [--timeout T] [--count N]",
+				Flags: []string{"--timeout DURATION", "--count N", "--json", "--allow-other-dm"},
 				Examples: []string{
 					"fmail watch task",
 					"fmail watch @$FMAIL_AGENT --count 1 --timeout 2m",

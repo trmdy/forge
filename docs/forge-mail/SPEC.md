@@ -183,14 +183,12 @@ fmail log                    # All recent messages
 fmail log task               # Just task topic
 fmail log task -n 5          # Last 5
 fmail log --since 1h         # Last hour
-fmail log task --after 20260111-153000-0042
 fmail log @myname            # Messages to me (inbox)
 ```
 
 Options:
 ```
 -n, --limit     Max messages (default: 20)
---after         Return messages after this message ID
 --since         Time filter (1h, 30m, 2024-01-10)
 --from          Filter by sender
 --follow, -f    Stream new messages (like tail -f)
@@ -199,7 +197,6 @@ Options:
 ```
 
 JSON output uses JSON Lines (one message per line).
-`--after` takes precedence over `--since` when both are provided.
 
 Note: `fmail log @$FMAIL_AGENT` shows your inbox.
 
@@ -215,7 +212,6 @@ Examples:
 ```bash
 fmail watch                  # All topics
 fmail watch task             # Just task
-fmail watch task --after 20260111-153000-0042
 fmail watch @myname          # My direct messages
 fmail watch --timeout 5m     # Exit after 5 minutes
 ```
@@ -224,16 +220,12 @@ Options:
 ```
 --timeout       Max wait time (default: forever)
 --count, -c     Exit after N messages
---after         Return messages after this message ID
---since         Time filter (1h, 30m, 2024-01-10)
 --allow-other-dm  Allow watching another agent's DM inbox
 --json          JSON output
 ```
 
 In standalone mode: polls every 100ms.
 In connected mode: real-time streaming via forged.
-
-`--after` takes precedence over `--since` when both are provided.
 
 Exit codes:
 ```
