@@ -14,6 +14,7 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -38,6 +39,23 @@ builds:
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
+  - id: forge-agent-runner
+    main: ./cmd/forge-agent-runner
+    binary: forge-agent-runner
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
   - id: fmail
     main: ./cmd/fmail
     binary: fmail
@@ -46,6 +64,7 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -60,9 +79,13 @@ archives:
     builds:
       - forge
       - forged
+      - forge-agent-runner
       - fmail
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
 
 checksum:
   name_template: checksums.txt

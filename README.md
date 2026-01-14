@@ -31,6 +31,23 @@ Key features:
 | **Queue** | Per-loop queue of messages and control items |
 | **Ledger** | Markdown log of loop iterations stored in the repo |
 
+## Install
+
+Linux (x86_64/arm64):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tOgg1/forge/main/scripts/install-linux.sh | bash
+```
+
+Optional overrides:
+
+```bash
+FORGE_VERSION=v0.0.0 FORGE_INSTALL_DIR="$HOME/.local/bin" FORGE_BINARIES="forge" \
+  bash -c 'curl -fsSL https://raw.githubusercontent.com/tOgg1/forge/main/scripts/install-linux.sh | bash'
+```
+
+Homebrew (macOS) can be wired once a tap repo is chosen.
+
 ## Quick Start
 
 ```bash
