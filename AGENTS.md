@@ -1,61 +1,18 @@
 # Agent Instructions
 
-This project uses `tk` for issue tracking. Run `tk help` when you need it.
+Forge is a control plane for running and supervising AI coding agents across
+repos and servers, using SSH + tmux with an optional per-node daemon and a
+SQLite-backed event log.
 
-## Quick Reference
+This repo uses Agent Skills for common workflows. The canonical instructions
+live in `.agent-skills/` and are installed to harnesses via
+`scripts/install-skills.sh` (see `docs/skills.md`).
 
-```bash
-tk ready              # List ready tickets
-tk show <id>          # View ticket details
-tk start <id>         # Mark in_progress
-tk close <id>         # Close ticket
-tk create "Title" -t bug|feature|task -p 0-4 -d "Description"
-```
+## Skills Index
 
-## Issue Tracking with tk
+- `issue-tracking`: `tk` workflow and ticket expectations.
+- `agent-communication`: `fmail` usage and naming conventions.
+- `session-protocol`: end-of-session git checklist.
+- `workflow-pattern`: status updates, priorities, and workflow guidance.
 
-This project uses `tk` for issue tracking.
-Tickets live in `.tickets/` and should be committed with related code changes.
-Run `tk help` when you need more commands.
-
-## Agent Communication (fmail)
-
-We use `fmail` for agent-to-agent messaging (not MCP agent mail).
-
-```bash
-export FMAIL_AGENT=<your-name>   # Prefer a stable name for the session
-fmail register                   # Request a unique name (auto-generated)
-fmail send @agent "message"      # Direct message
-fmail send topic "message"       # Topic message (e.g., status, editing)
-fmail log @agent -n 20           # Read DMs
-fmail watch topic --count 1      # Wait for a reply
-```
-
-Notes:
-- Use kebab-case agent names (auto-generated names already follow this).
-- `fmail who` shows known agents and their status.
-
-### Workflow Pattern
-
-3. **Work**: Implement the task
-
-### Key Concepts
-
-- **Priority**: P0=critical, P1=high, P2=medium, P3=low, P4=backlog (use numbers, not words)
-- **Types**: task, bug, feature, epic, question, docs
-
-### Session Protocol
-
-**Before ending any session, run this checklist:**
-
-```bash
-git status              # Check what changed
-git add <files>         # Stage code changes
-git commit -m "..."     # Commit code
-git push                # Push to remote
-```
-
-### Best Practices
-
-- Update status as you work (in_progress → closed)
-- Use descriptive titles and set appropriate priority/type
+If you need a specific detail, open the relevant skill in `.agent-skills/`.

@@ -1,7 +1,19 @@
 # Agent Skills
 
 Forge keeps harness-agnostic skills in `.agent-skills/` following the Agent Skills
-folder format. Harness-specific installs are handled by the installer script.
+folder format. You can install the built-in skills to harnesses with the CLI.
+
+## Bootstrap skills into a repo
+
+```bash
+forge skills bootstrap
+```
+
+This installs the built-in skill set into harness-specific locations based on
+the configured Forge profiles. When a profile does not specify `auth_home`,
+skills are installed into repo-local harness folders (for example
+`.codex/skills/`). Use `--force` to overwrite existing files, or `--path` to
+point at a custom skills source directory.
 
 ## Install to configured harnesses
 
