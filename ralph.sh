@@ -121,7 +121,7 @@ headless_alias_cmd() {
       ;;
     codex1|codex2)
       printf '%s\n%s\n' \
-        "${alias_cmd} exec --full-auto -" \
+        "${alias_cmd} exec -" \
         "stdin"
       return 0
       ;;
@@ -324,4 +324,3 @@ case "${1:-}" in
     exit 2
     ;;
 esac
-

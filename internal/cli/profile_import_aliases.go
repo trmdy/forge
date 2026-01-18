@@ -685,7 +685,7 @@ func buildOpenCode(aliasCmd string) (models.Harness, models.PromptMode, string) 
 }
 
 func buildCodex(aliasCmd string) (models.Harness, models.PromptMode, string) {
-	command := fmt.Sprintf("%s exec --full-auto -", aliasCmd)
+	command := fmt.Sprintf("%s exec -", aliasCmd)
 	return models.HarnessCodex, models.PromptModeStdin, command
 }
 
