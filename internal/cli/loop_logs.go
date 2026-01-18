@@ -117,6 +117,7 @@ func readLog(path string, lines int, since string) (string, error) {
 
 	scanner := bufio.NewScanner(file)
 	buffer := make([]string, 0, lines)
+	highlighter := newLogHighlighter()
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !parsedSince.IsZero() {
@@ -125,7 +126,7 @@ func readLog(path string, lines int, since string) (string, error) {
 			}
 		}
 
-		buffer = append(buffer, line)
+		buffer = append(buffer, highlighter.HighlightLine(line))
 		if len(buffer) > lines {
 			buffer = buffer[1:]
 		}
@@ -153,6 +154,7 @@ func followFile(path string, lines int) error {
 
 	offset, _ := file.Seek(0, io.SeekEnd)
 	reader := bufio.NewReader(file)
+	highlighter := newLogHighlighter()
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -162,7 +164,7 @@ func followFile(path string, lines int) error {
 			continue
 		}
 		offset += int64(len(line))
-		fmt.Print(line)
+		fmt.Print(highlighter.HighlightLine(line))
 	}
 }
 
