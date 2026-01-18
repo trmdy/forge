@@ -51,7 +51,7 @@ func (h *logHighlighter) HighlightLine(line string) string {
 
 	if h.inCodeFence {
 		if h.codeFenceLang == "diff" {
-			if color := diffLineColor(line); color != "" {
+			if color := diffLineColor(line, true); color != "" {
 				return colorize(line, color) + newline
 			}
 		}
@@ -72,7 +72,7 @@ func (h *logHighlighter) HighlightLine(line string) string {
 		return colorize(line, colorRed) + newline
 	}
 
-	if color := diffLineColor(line); color != "" {
+	if color := diffLineColor(line, false); color != "" {
 		return colorize(line, color) + newline
 	}
 
@@ -133,7 +133,7 @@ func sectionColor(section string) string {
 	}
 }
 
-func diffLineColor(line string) string {
+func diffLineColor(line string, inFence bool) string {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
 		return ""
@@ -148,9 +148,9 @@ func diffLineColor(line string) string {
 		return colorGreen
 	case strings.HasPrefix(trimmed, "---"):
 		return colorRed
-	case strings.HasPrefix(trimmed, "+"):
+	case inFence && strings.HasPrefix(trimmed, "+"):
 		return colorGreen
-	case strings.HasPrefix(trimmed, "-"):
+	case inFence && strings.HasPrefix(trimmed, "-"):
 		return colorRed
 	default:
 		return ""
