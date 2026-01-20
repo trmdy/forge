@@ -24,9 +24,10 @@ func init() {
 }
 
 var workflowCmd = &cobra.Command{
-	Use:   "workflow",
-	Short: "Manage workflows",
-	Long:  "List, inspect, and validate workflow definitions.",
+	Use:     "workflow",
+	Aliases: []string{"wf"},
+	Short:   "Manage workflows",
+	Long:    "List, inspect, and validate workflow definitions.",
 }
 
 var workflowListCmd = &cobra.Command{
