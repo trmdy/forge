@@ -267,6 +267,14 @@ func printWorkflow(wf *workflows.Workflow, projectDir string) {
 	for i, step := range wf.Steps {
 		fmt.Printf("  %d. %s\n", i+1, formatWorkflowStep(step))
 	}
+
+	lines := workflowFlowchartLines(wf)
+	if len(lines) > 0 {
+		fmt.Println("\nFlow:")
+		for _, line := range lines {
+			fmt.Printf("  %s\n", line)
+		}
+	}
 }
 
 func formatWorkflowMap(values map[string]any) string {
@@ -299,4 +307,65 @@ func formatWorkflowStep(step workflows.WorkflowStep) string {
 		label = fmt.Sprintf("%s (depends_on: %s)", label, strings.Join(step.DependsOn, ", "))
 	}
 	return label
+}
+
+func workflowFlowchartLines(wf *workflows.Workflow) []string {
+	if wf == nil || len(wf.Steps) == 0 {
+		return nil
+	}
+
+	order := make(map[string]int, len(wf.Steps))
+	for i, step := range wf.Steps {
+		if step.ID == "" {
+			continue
+		}
+		order[step.ID] = i
+	}
+
+	outgoing := make(map[string][]string)
+	incoming := make(map[string]int)
+
+	for _, step := range wf.Steps {
+		if step.ID == "" {
+			continue
+		}
+		if _, ok := incoming[step.ID]; !ok {
+			incoming[step.ID] = 0
+		}
+		for _, dep := range step.DependsOn {
+			if dep == "" {
+				continue
+			}
+			outgoing[dep] = append(outgoing[dep], step.ID)
+			incoming[step.ID]++
+		}
+	}
+
+	lines := make([]string, 0)
+	for _, step := range wf.Steps {
+		id := step.ID
+		if id == "" {
+			continue
+		}
+		targets := outgoing[id]
+		if len(targets) == 0 {
+			continue
+		}
+		sort.Slice(targets, func(i, j int) bool {
+			return order[targets[i]] < order[targets[j]]
+		})
+		lines = append(lines, fmt.Sprintf("%s -> %s", id, strings.Join(targets, ", ")))
+	}
+
+	for _, step := range wf.Steps {
+		id := step.ID
+		if id == "" {
+			continue
+		}
+		if incoming[id] == 0 && len(outgoing[id]) == 0 {
+			lines = append(lines, id)
+		}
+	}
+
+	return lines
 }
