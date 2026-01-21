@@ -168,20 +168,24 @@ func applyCodexSandbox(command string, codexConfig string) string {
 		return trimmed
 	}
 
+	sandbox := detectCodexSandbox(codexConfig)
+	if sandbox == "" {
+		return trimmed
+	}
+
+	// --full-auto forces workspace-write, so remove it when a stricter sandbox is configured.
+	if sandbox != "workspace-write" && strings.Contains(trimmed, "--full-auto") {
+		trimmed = strings.ReplaceAll(trimmed, "--full-auto", "")
+		trimmed = strings.Join(strings.Fields(trimmed), " ")
+	}
+
 	// Respect explicit sandbox flags in the command template.
 	if strings.Contains(trimmed, "--dangerously-bypass-approvals-and-sandbox") || strings.Contains(trimmed, "--sandbox ") {
 		return trimmed
 	}
 
-	sandbox := detectCodexSandbox(codexConfig)
-	if sandbox == "" || sandbox == "workspace-write" {
+	if sandbox == "workspace-write" {
 		return trimmed
-	}
-
-	// --full-auto forces workspace-write, so remove it when a stricter sandbox is configured.
-	if strings.Contains(trimmed, "--full-auto") {
-		trimmed = strings.ReplaceAll(trimmed, "--full-auto", "")
-		trimmed = strings.Join(strings.Fields(trimmed), " ")
 	}
 
 	if strings.HasSuffix(trimmed, " -") {
