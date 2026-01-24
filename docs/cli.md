@@ -202,7 +202,7 @@ Manage harness profiles.
 
 ```bash
 forge profile ls
-forge profile import-aliases
+forge profile init
 forge profile add pi --name local
 forge profile edit local --max-concurrency 2
 forge profile cooldown set local --until 30m

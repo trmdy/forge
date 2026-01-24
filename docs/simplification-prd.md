@@ -203,7 +203,7 @@ Forge should provide a smooth migration path:
 
 Optionally:
 
-* `forge profile import-aliases` reads alias files similar to your Ralph script’s alias resolution behavior (shell-based + grep fallback). 
+* `forge profile init` reads alias files similar to your Ralph script’s alias resolution behavior (shell-based + grep fallback). 
 
 ---
 

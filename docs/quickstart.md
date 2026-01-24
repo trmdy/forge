@@ -38,10 +38,10 @@ Workflow definitions live in `.forge/workflows/*.toml`.
 
 ## Configure profiles
 
-Import aliases from common shell alias files (or `FORGE_ALIAS_FILE`, which can be a path list):
+Import aliases from common shell alias files (or `FORGE_ALIAS_FILE`, which can be a path list). When using defaults, Forge also detects installed harnesses on `PATH`:
 
 ```bash
-./build/forge profile import-aliases
+./build/forge profile init
 ```
 
 Or add one manually:
