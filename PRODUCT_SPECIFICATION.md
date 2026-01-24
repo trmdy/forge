@@ -11,7 +11,7 @@ This document consolidates everything we’ve discussed so far into a single coh
 
 ## 1) Product overview
 
-Forge is a control plane for running and supervising many AI coding agents across many repositories and servers—locally and remotely—with:
+Forge is a control plane for running and supervising many AI coding agents across many repositories and servers-locally and remotely-with:
 
 * A **“sexy,” fast TUI** that makes it obvious what’s progressing vs blocked.
 * A fully interoperable **CLI** (machine-readable output) for external automation (e.g., Empire Cockpit).
@@ -63,6 +63,26 @@ Forge will support multiple agent CLIs, but will be **OpenCode-first** as the �
 * Replacing tmux with a custom terminal multiplexer.
 * Full “enterprise” multi-user RBAC from day one.
 * Perfect provider quota accounting (we aim for practical cooldown + failover).
+
+---
+
+## 2.3 Next iteration vision (workflows + mesh)
+
+This iteration extends Forge from a loop runner to a workflow orchestration plane.
+
+**Additions**
+
+* **Workflow**: DAG of steps (agent, bash, logic, job, human) with pre/post hooks, stop conditions, and fan-out.
+* **Job**: higher-level unit that starts workflows, runs scripts, or dispatches work across nodes. Has input/output.
+* **Trigger**: CLI, cron, or HTTP webhook starts a job.
+* **Node + mesh**: registered computers running `forged`. Mesh has a single active master; master routes commands.
+* **Parasitic steps**: steps that stay alive only while another step exists (e.g., committer agent).
+
+**Continuity**
+
+* Loops remain the core execution primitive and map to workflow step type `loop`.
+* Profiles/pools remain the harness selection layer for agent steps.
+* Ledgers remain the audit trail, now extended to workflow/job execution.
 
 ---
 
@@ -517,7 +537,7 @@ State always includes:
 * Basic node bootstrap
 * OpenCode adapter **as primary** (at least spawn + queue + state via its structured interface where possible)
 
-### v0.2–v1.0
+### v0.2-v1.0
 
 * forged for real-time scaling and better performance
 * approvals inbox (especially strong for OpenCode)
@@ -697,4 +717,3 @@ DB access:
 
   * spin up a local tmux server in CI and validate “spawn agent → send → capture-pane → state update”
   * mock ssh backend for deterministic remote behavior
-
