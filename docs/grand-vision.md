@@ -4,6 +4,69 @@
 
 Forge evolves from loop runner to workflow orchestration plane for multi-agent, multi-node work.
 
+## Core concepts (expanded)
+
+- **Agent**: LLM-backed worker (model + prompt + profile/harness).
+- **Prompt**: instruction + behavior definition; can include autodetection rules.
+- **Workflow**: directed graph of steps (agent, bash, loop, logic, human, job, workflow).
+- **Loop**: persistent execution pattern (aka ralph loop).
+- **Team**: long-lived group of agents with identity + roles + delegation rules.
+- **Job**: triggerable unit of work that runs one or more workflows.
+- **Trigger**: cron/webhook/CLI start signal for a job.
+- **Node**: registered machine that can execute forge work (runs `forged`).
+- **Mesh**: set of nodes with one active master coordinating routing.
+
+## Agents + prompts (proposed files)
+
+**Central registry (recommended)**
+
+- Global source of truth lives on each node (default: `~/.forge/registry/`)
+- Repo export for sharing: `.forge/registry/` (commit-friendly)
+- Commands: `forge registry export/import` (push/pull)
+- Dashboard can query remote registry via master routing
+
+**Agent profile (`agents/*.yaml`)**
+
+- id, name
+- harness/profile (codex, claude, opencode, amp, pi, droid)
+- memory + ledger scope
+- execution history metadata
+
+**Prompt definition (`prompts/*.md`)**
+
+- id, name
+- system prompt + metadata
+- selection rules (optional)
+- loop behavior
+- sequence
+
+Agents + prompts combine into runnable units.
+
+## Prompt selection (defaults)
+
+Used when task/workflow does not specify `prompt_id`.
+
+Precedence:
+
+1. explicit `prompt_id` on task/workflow step
+2. team rule match
+3. repo default
+4. global default
+
+Rule order: higher priority → more specific → first-defined.
+
+## Workflow runs (runtime model)
+
+A workflow run is the concrete execution instance.
+
+Fields (proposed):
+
+- id
+- name
+- steps
+- current_step
+- ledger
+
 ## How it integrates with current Forge
 
 - **Loop** stays core primitive. `forge up/ps/msg/queue` map to `forge loop` subcommands.
@@ -11,6 +74,64 @@ Forge evolves from loop runner to workflow orchestration plane for multi-agent, 
 - **Ledger** expands from per-loop to per-workflow/job audit trail.
 - **Repo config** (`.forge/forge.yaml`) remains. New workflow files live alongside prompts.
 - **TUI/CLI** gain workflow + job views, but loop views remain first-class.
+
+## Teams
+
+Teams are persistent groups of agents with identity, memory, and roles.
+
+Key traits:
+
+- long-lived agents (vs workflows which are ephemeral)
+- team IDs + names; optional leader role
+- delegation rules route tasks to the right agent
+- agents communicate via `fmail`
+- persisted per node under `~/.forge` (default)
+
+Task delegation:
+
+- tasks can be sent to a team (CLI/UI/webhook/cron)
+- tasks can be strings or JSON payloads
+- rules can route based on payload keys (e.g. `type: "design"`)
+- team members may spawn workflows via CLI using injected instructions
+
+Task payload (JSON, minimal):
+
+- `type`, `title`, `body`, `priority`
+- optional: `repo`, `tags`, `workflow`, `inputs`, `routing_hint`, `meta`
+
+Always-on teams:
+
+- heartbeats keep teams active
+- can ingest tasks from external systems (Linear/Slack/etc)
+- heartbeat interval configurable per team
+
+## Jobs + triggers
+
+Jobs encapsulate work and can:
+
+- spawn workflows (sequence or parallel)
+- run bash scripts
+- operate across nodes
+
+Triggers:
+
+- CLI, cron, webhook
+- inputs/outputs stored per job run
+- webhook auth: bearer token (rotation support)
+
+## Nodes + mesh
+
+- node = registered machine with `forged` daemon
+- mesh = set of nodes with one active master
+- client → master → node routing model
+- HTTPS with bearer token for remote commands
+
+## Loops (ralph)
+
+CLI spec:
+
+- `forge loop` (alias `flp`)
+- `flp up|ps|rm|stop|resume|send`
 
 ## Workflow file format (TOML) - proposal
 
@@ -177,6 +298,11 @@ depends_on = ["fix_design"]
 - `forge trigger add|ls|rm` (cron/webhook)
 - `forge node add|ls|doctor|exec|bootstrap`
 - `forge mesh status|promote|demote|join|leave`
+- `forge team ls|new|rm|show|member add|rm`
+- `forge task send|ls|show|assign|retry`
+- `forge registry ls|export|import|status`
+- `forge agent ls|show|validate`
+- `forge prompt ls|show|validate`
 
 **Examples**:
 
@@ -190,3 +316,43 @@ depends_on = ["fix_design"]
 - Workflow stop conditions: deterministic only, or allow LLM evals?
 - Human-in-loop: where approvals live (repo vs global db)?
 - Master election: static vs automatic failover for mesh.
+- Delegation rule language (final syntax).
+- Registry conflict resolution (local vs repo).
+
+## Autodetection (local harnesses + aliases)
+
+Purpose: detect installed harness CLIs and alias patterns on the local node.
+
+Inputs:
+
+- CLI existence: `codex`, `claude`, `opencode`, `pi`, `droid`, `amp`
+- Shell aliases from `~/.zsh_aliases` (optional: `zsh -ic 'alias'`)
+
+Outputs:
+
+- list of detected harnesses
+- alias mapping (e.g. `cc1` → `claude --profile A`)
+- proposed profile stubs (without credentials)
+
+## Profiles + mesh sync (later)
+
+Goal: fast provisioning of many profiles on new nodes without sharing credentials.
+
+Concept:
+
+- Central profile catalog defines how many profiles per harness type.
+- Profiles are instantiated on each node as non-alias canonical IDs (e.g. `CC1`, `Codex1`).
+- Nodes report auth status per profile (authenticated/expired/missing).
+- Master can show overview across mesh; credentials never synced.
+
+## Roadmap (sv milestones)
+
+- **M1** Workflow spec + CLI (non-exec)
+- **M2** Workflow runner (sequential)
+- **M3** Stop conditions, IO binding, hooks, fan-out
+- **M4** Human-in-loop steps + approvals
+- **M5** Jobs + triggers (cron/webhook)
+- **M6** Nodes + mesh routing
+- **M7** Teams + task delegation (new)
+- **M8** Agent profiles + prompt registry/autodetection (new)
+- **M9** Always-on teams + external task ingestion (new)
