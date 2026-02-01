@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -496,7 +495,7 @@ func (rm *ResourceMonitor) pauseAgentsForDisk() {
 		if _, alreadyPaused := rm.diskState.pausedAgents[state.agentID]; alreadyPaused {
 			continue
 		}
-		if err := signalProcess(state.pid, syscall.SIGSTOP); err != nil {
+		if err := pauseProcess(state.pid); err != nil {
 			rm.logger.Warn().Err(err).Str("agent_id", state.agentID).Int("pid", state.pid).Msg("failed to pause agent due to disk pressure")
 			continue
 		}
@@ -514,7 +513,7 @@ func (rm *ResourceMonitor) resumeAgentsForDisk() {
 		if state, ok := rm.agents[agentID]; ok && state.pid > 0 {
 			pid = state.pid
 		}
-		if err := signalProcess(pid, syscall.SIGCONT); err != nil {
+		if err := resumeProcess(pid); err != nil {
 			rm.logger.Warn().Err(err).Str("agent_id", agentID).Int("pid", pid).Msg("failed to resume agent after disk pressure")
 			continue
 		}
@@ -528,17 +527,6 @@ func (rm *ResourceMonitor) publishDiskAlert(code, message string, recoverable bo
 		return
 	}
 	rm.server.publishError("", "", code, message, recoverable)
-}
-
-func signalProcess(pid int, sig syscall.Signal) error {
-	if pid <= 0 {
-		return fmt.Errorf("invalid pid %d", pid)
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	return process.Signal(sig)
 }
 
 // measureUsage measures the resource usage of a process.
@@ -666,30 +654,6 @@ func (rm *ResourceMonitor) getCPUUsage(pid int) (float64, error) {
 
 	cpuUsage := 100.0 * (float64(totalTime) / float64(clockTicks)) / seconds
 	return cpuUsage, nil
-}
-
-func getDiskUsage(path string) (DiskUsage, error) {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(path, &stat); err != nil {
-		return DiskUsage{}, err
-	}
-
-	total := stat.Blocks * uint64(stat.Bsize)
-	free := stat.Bavail * uint64(stat.Bsize)
-	used := total - free
-
-	var usedPercent float64
-	if total > 0 {
-		usedPercent = (float64(used) / float64(total)) * 100
-	}
-
-	return DiskUsage{
-		Path:        path,
-		TotalBytes:  total,
-		FreeBytes:   free,
-		UsedBytes:   used,
-		UsedPercent: usedPercent,
-	}, nil
 }
 
 func formatBytes(value uint64) string {
