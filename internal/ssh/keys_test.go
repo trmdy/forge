@@ -25,6 +25,7 @@ func writeKeyFile(t *testing.T, passphrase string) string {
 	}
 
 	if passphrase != "" {
+		//nolint:staticcheck // legacy PEM encryption used for test coverage
 		block, err = x509.EncryptPEMBlock(rand.Reader, block.Type, block.Bytes, []byte(passphrase), x509.PEMCipherAES256)
 		if err != nil {
 			t.Fatalf("encrypt key: %v", err)

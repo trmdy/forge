@@ -336,7 +336,9 @@ func (db *DB) applyMigrationTx(ctx context.Context, version int, description, sq
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	// Execute migration SQL
 	if _, err := tx.ExecContext(ctx, sql); err != nil {
@@ -359,7 +361,9 @@ func (db *DB) rollbackMigrationTx(ctx context.Context, version int, sql string) 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	// Execute rollback SQL
 	if _, err := tx.ExecContext(ctx, sql); err != nil {

@@ -484,7 +484,7 @@ func fuzzyMatch(haystack, token string) bool {
 		return true
 	}
 	matchIdx := 0
-	for _, r := range []rune(haystack) {
+	for _, r := range haystack {
 		if r == needle[matchIdx] {
 			matchIdx++
 			if matchIdx == len(needle) {

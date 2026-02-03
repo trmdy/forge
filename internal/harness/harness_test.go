@@ -2,6 +2,8 @@ package harness
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -146,4 +148,54 @@ func TestBuildExecutionStdinMode(t *testing.T) {
 	if exec.Stdin == nil {
 		t.Fatalf("expected stdin to be set")
 	}
+}
+
+func TestApplyCodexSandboxOverridesBypass(t *testing.T) {
+	configPath := writeCodexConfig(t, `sandbox_mode = "read-only"`)
+	command := "codex exec --dangerously-bypass-approvals-and-sandbox -"
+
+	updated := applyCodexSandbox(command, configPath)
+
+	if strings.Contains(updated, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("expected bypass flag to be removed, got %q", updated)
+	}
+	if updated != "codex exec --sandbox read-only -" {
+		t.Fatalf("expected sandbox flag to be applied, got %q", updated)
+	}
+}
+
+func TestApplyCodexSandboxDetectsEqualsForm(t *testing.T) {
+	configPath := writeCodexConfig(t, `sandbox_mode = "read-only"`)
+	command := "codex exec --sandbox=read-only -"
+
+	updated := applyCodexSandbox(command, configPath)
+
+	if updated != command {
+		t.Fatalf("expected command to remain unchanged, got %q", updated)
+	}
+}
+
+func TestApplyCodexSandboxWorkspaceWriteDropsBypass(t *testing.T) {
+	configPath := writeCodexConfig(t, `sandbox_mode = "workspace-write"`)
+	command := "codex exec --dangerously-bypass-approvals-and-sandbox -"
+
+	updated := applyCodexSandbox(command, configPath)
+
+	if strings.Contains(updated, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("expected bypass flag to be removed, got %q", updated)
+	}
+	if updated != "codex exec -" {
+		t.Fatalf("expected no sandbox flag to be added for workspace-write, got %q", updated)
+	}
+}
+
+func writeCodexConfig(t *testing.T, content string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
 }

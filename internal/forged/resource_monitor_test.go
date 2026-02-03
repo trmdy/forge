@@ -3,6 +3,7 @@ package forged
 import (
 	"context"
 	"os"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -173,6 +174,12 @@ func TestResourceMonitor_CustomLimits(t *testing.T) {
 func TestResourceMonitor_ViolationCallback(t *testing.T) {
 	if os.Getenv("CI") != "" {
 		t.Skip("skipping in CI - requires /proc filesystem")
+	}
+	if runtime.GOOS != "linux" {
+		t.Skip("skipping - requires /proc filesystem")
+	}
+	if _, err := os.Stat("/proc"); err != nil {
+		t.Skip("skipping - /proc not available")
 	}
 
 	logger := zerolog.Nop()

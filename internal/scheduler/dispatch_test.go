@@ -150,6 +150,12 @@ func (m *trackingQueueService) queueLength(agentID string) int {
 	return len(m.queues[agentID])
 }
 
+func (m *trackingQueueService) dequeueCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.dequeueCalls
+}
+
 type dispatchExecutor struct {
 	mu       sync.Mutex
 	commands []string

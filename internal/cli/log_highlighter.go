@@ -65,6 +65,23 @@ func (h *logHighlighter) HighlightLine(line string) string {
 		}
 	}
 
+	if ts, ok := parseLogTimestamp(line); ok {
+		_ = ts
+		leading := len(line) - len(strings.TrimLeft(line, " "))
+		rest := line[leading:]
+		end := strings.Index(rest, "]")
+		if end != -1 {
+			prefix := rest[:end+1]
+			remainder := rest[end+1:]
+			message := strings.TrimLeft(remainder, " ")
+			color := pickLogMessageColor(message)
+			if color == "" {
+				return strings.Repeat(" ", leading) + colorize(prefix, colorCyan) + remainder + newline
+			}
+			return strings.Repeat(" ", leading) + colorize(prefix, colorCyan) + colorize(remainder, color) + newline
+		}
+	}
+
 	if strings.Contains(trimmed, "succeeded in") {
 		return colorize(line, colorGreen) + newline
 	}
@@ -82,23 +99,6 @@ func (h *logHighlighter) HighlightLine(line string) string {
 
 	if trimmed == "--------" || trimmed == "---" {
 		return colorize(line, colorYellow) + newline
-	}
-
-	if ts, ok := parseLogTimestamp(line); ok {
-		_ = ts
-		leading := len(line) - len(strings.TrimLeft(line, " "))
-		rest := line[leading:]
-		end := strings.Index(rest, "]")
-		if end != -1 {
-			prefix := rest[:end+1]
-			remainder := rest[end+1:]
-			message := strings.TrimLeft(remainder, " ")
-			color := pickLogMessageColor(message)
-			if color == "" {
-				return strings.Repeat(" ", leading) + colorize(prefix, colorCyan) + remainder + newline
-			}
-			return strings.Repeat(" ", leading) + colorize(prefix, colorCyan) + colorize(remainder, color) + newline
-		}
 	}
 
 	if h.section == "thinking" {

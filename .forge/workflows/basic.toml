@@ -1,0 +1,18 @@
+# Basic workflow example
+name = "basic"
+version = "0.1"
+description = "Plan then build"
+
+[inputs]
+repo = "."
+
+[[steps]]
+id = "plan"
+type = "agent"
+prompt_name = "plan"
+
+[[steps]]
+id = "build"
+type = "bash"
+cmd = "echo build"
+depends_on = ["plan"]

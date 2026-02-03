@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -25,6 +26,12 @@ func TestDialDirect(t *testing.T) {
 
 	// Start a test daemon
 	cfg := config.DefaultConfig()
+	root := t.TempDir()
+	cfg.Global.DataDir = filepath.Join(root, "data")
+	cfg.Global.ConfigDir = filepath.Join(root, "config")
+	if err := cfg.EnsureDirectories(); err != nil {
+		t.Fatalf("failed to create config dirs: %v", err)
+	}
 	daemon, err := New(cfg, zerolog.Nop(), Options{Port: 50100})
 	if err != nil {
 		t.Fatalf("failed to create daemon: %v", err)

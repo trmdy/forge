@@ -70,7 +70,11 @@ func (s *Service) Doctor(ctx context.Context, node *models.Node) (*DoctorReport,
 		executor = sshExec
 		closeFn = sshExec.Close
 	}
-	defer closeFn()
+	defer func() {
+		if err := closeFn(); err != nil {
+			s.logger.Warn().Err(err).Msg("failed to close node executor")
+		}
+	}()
 
 	checks := runDoctorChecks(ctx, executor, node.IsLocal)
 

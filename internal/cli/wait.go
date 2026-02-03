@@ -43,7 +43,9 @@ func init() {
 	waitCmd.Flags().DurationVar(&waitPollInterval, "poll-interval", 2*time.Second, "check interval")
 	waitCmd.Flags().BoolVarP(&waitQuiet, "quiet", "q", false, "no output, just wait")
 
-	waitCmd.MarkFlagRequired("until")
+	if err := waitCmd.MarkFlagRequired("until"); err != nil {
+		panic(err)
+	}
 }
 
 var waitCmd = &cobra.Command{

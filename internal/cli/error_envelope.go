@@ -40,7 +40,20 @@ func handleCLIError(err error) error {
 		return nil
 	}
 
+	var exitErr *ExitError
+	if errors.As(err, &exitErr) {
+		if exitErr.Printed {
+			return exitErr
+		}
+		if exitErr.Err != nil {
+			err = exitErr.Err
+		}
+	}
+
 	exitCode := exitCodeFromError(err)
+	if exitErr != nil && exitErr.Code != 0 {
+		exitCode = exitErr.Code
+	}
 
 	if IsJSONOutput() || IsJSONLOutput() {
 		envelope := buildErrorEnvelope(err)

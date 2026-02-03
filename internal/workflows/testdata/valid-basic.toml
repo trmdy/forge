@@ -1,0 +1,18 @@
+# Valid workflow fixture
+name = "basic"
+version = "0.1"
+description = "Basic workflow"
+
+[inputs]
+repo = "."
+
+[[steps]]
+id = "plan"
+type = "agent"
+prompt_name = "plan"
+
+[[steps]]
+id = "build"
+type = "BASH"
+cmd = "echo build"
+depends_on = ["plan"]

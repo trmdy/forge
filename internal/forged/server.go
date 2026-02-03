@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -467,7 +466,7 @@ func (s *Server) StreamPaneUpdates(req *forgedv1.StreamPaneUpdatesRequest, strea
 	}
 
 	s.mu.RLock()
-	info, exists := s.agents[req.AgentId]
+	_, exists := s.agents[req.AgentId]
 	s.mu.RUnlock()
 
 	if !exists {
@@ -492,6 +491,7 @@ func (s *Server) StreamPaneUpdates(req *forgedv1.StreamPaneUpdatesRequest, strea
 		Dur("poll_interval", pollInterval).
 		Msg("starting pane update stream")
 
+	var info *agentInfo
 	for {
 		select {
 		case <-ctx.Done():
@@ -767,17 +767,6 @@ func (s *Server) agentToProto(info *agentInfo) *forgedv1.Agent {
 		SpawnedAt:      timestamppb.New(info.spawnedAt),
 		LastActivityAt: timestamppb.New(info.lastActive),
 		ContentHash:    info.contentHash,
-	}
-}
-
-func (s *Server) getResourceUsage() *forgedv1.ResourceUsage {
-	var rusage syscall.Rusage
-	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &rusage); err != nil {
-		return &forgedv1.ResourceUsage{}
-	}
-
-	return &forgedv1.ResourceUsage{
-		MemoryBytes: rusage.Maxrss * 1024, // maxrss is in KB on Linux
 	}
 }
 

@@ -26,12 +26,22 @@ From the repo you want to run loops in:
 
 This creates `.forge/` scaffolding and a `PROMPT.md` if missing.
 
-## Configure profiles
+## Workflows (preview)
 
-Import aliases from common shell alias files (or `FORGE_ALIAS_FILE`, which can be a path list):
+Workflow definitions live in `.forge/workflows/*.toml`.
 
 ```bash
-./build/forge profile import-aliases
+./build/forge workflow ls
+./build/forge workflow show <name>
+./build/forge workflow validate <name>
+```
+
+## Configure profiles
+
+Import aliases from common shell alias files (or `FORGE_ALIAS_FILE`, which can be a path list). When using defaults, Forge also detects installed harnesses on `PATH`:
+
+```bash
+./build/forge profile init
 ```
 
 Or add one manually:

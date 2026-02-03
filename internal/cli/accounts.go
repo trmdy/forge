@@ -16,7 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/account"
-	"github.com/tOgg1/forge/internal/account/caam"
+	"github.com/tOgg1/forge/internal/account/caam" //nolint:staticcheck // legacy support
 	"github.com/tOgg1/forge/internal/agent"
 	"github.com/tOgg1/forge/internal/config"
 	"github.com/tOgg1/forge/internal/db"

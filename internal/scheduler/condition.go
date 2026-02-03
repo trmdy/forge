@@ -482,7 +482,7 @@ var operatorRegex = regexp.MustCompile(`^(.+?)\s*(==|!=|<>|>=|<=|>|<|=)\s*(.+)$`
 
 func tokenizeExpression(expr string) []string {
 	matches := operatorRegex.FindStringSubmatch(expr)
-	if matches == nil || len(matches) < 4 {
+	if len(matches) < 4 {
 		// Fallback to simple split
 		return strings.Fields(expr)
 	}

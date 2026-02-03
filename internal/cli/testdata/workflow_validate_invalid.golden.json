@@ -1,0 +1,15 @@
+{
+  "name": "bad-dep",
+  "path": "<repo>/.forge/workflows/bad-dep.toml",
+  "valid": false,
+  "errors": [
+    {
+      "code": "ERR_MISSING_STEP",
+      "message": "unknown dependency \"missing\"",
+      "path": "<repo>/.forge/workflows/bad-dep.toml",
+      "step_id": "build",
+      "field": "depends_on",
+      "index": 1
+    }
+  ]
+}

@@ -277,10 +277,6 @@ func resolveQueueOptions(cmd *cobra.Command) (queueOptions, error) {
 		opts.Front = true
 	}
 
-	if cmd.Flags().Changed("priority") && priority == "low" {
-		// Low priority maps to default enqueue behavior.
-	}
-
 	return opts, nil
 }
 

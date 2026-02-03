@@ -204,11 +204,8 @@ func TestMigrateCreatesSchemaVersionTable(t *testing.T) {
 	}
 	defer database.Close()
 
-	// Calling SchemaVersion should create the table
-	_, err = database.SchemaVersion(ctx)
-	if err == nil {
-		// Table might not exist yet, that's fine
-	}
+	// Calling SchemaVersion should create the table (may fail pre-migration).
+	_, _ = database.SchemaVersion(ctx)
 
 	// After MigrateUp, table should definitely exist
 	_, err = database.MigrateUp(ctx)

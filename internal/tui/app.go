@@ -6404,7 +6404,7 @@ func fuzzyMatch(haystack, token string) bool {
 	}
 	needle := []rune(token)
 	matchIdx := 0
-	for _, r := range []rune(haystack) {
+	for _, r := range haystack {
 		if r == needle[matchIdx] {
 			matchIdx++
 			if matchIdx == len(needle) {
@@ -6414,3 +6414,13 @@ func fuzzyMatch(haystack, token string) bool {
 	}
 	return false
 }
+
+var (
+	_ = accountSummary{}
+	_ = mostRecentAgentCard
+	_ = model.paletteSelectionMax
+	_ = sampleNodes
+	_ = sampleWorkspaces
+	_ = sampleWorkspaceCards
+	_ = (*model).addQueueItem
+)

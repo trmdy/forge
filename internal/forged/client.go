@@ -70,6 +70,7 @@ func Dial(ctx context.Context, target string, opts ...ClientOption) (*Client, er
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}, cfg.dialOpts...)
 
+	//nolint:staticcheck // grpc.DialContext remains supported across gRPC 1.x
 	conn, err := grpc.DialContext(ctx, target, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial forged at %s: %w", target, err)
@@ -143,6 +144,7 @@ func DialSSH(ctx context.Context, sshHost string, sshPort int, forgedPort int, o
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}, cfg.dialOpts...)
 
+	//nolint:staticcheck // grpc.DialContext remains supported across gRPC 1.x
 	conn, err := grpc.DialContext(ctx, localAddr, dialOpts...)
 	if err != nil {
 		_ = tunnel.Close()
@@ -202,6 +204,7 @@ func DialSSHWithExecutor(ctx context.Context, executor ssh.PortForwarder, forged
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}, cfg.dialOpts...)
 
+	//nolint:staticcheck // grpc.DialContext remains supported across gRPC 1.x
 	conn, err := grpc.DialContext(ctx, localAddr, dialOpts...)
 	if err != nil {
 		_ = tunnel.Close()
@@ -330,7 +333,7 @@ func (c *Client) Close() error {
 type sshDialer struct {
 	forwarder  ssh.PortForwarder
 	remotePort int
-	logger     zerolog.Logger
+	logger     zerolog.Logger //nolint:unused // reserved for future logging
 }
 
 // DialContext implements the grpc.WithContextDialer interface.
@@ -381,3 +384,10 @@ func (c *tunneledConn) Close() error {
 	}
 	return tunnelErr
 }
+
+var (
+	_ = (*sshDialer)(nil)
+	_ = (*sshDialer).DialContext
+	_ = (*tunneledConn)(nil)
+	_ = (*tunneledConn).Close
+)

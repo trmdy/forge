@@ -217,9 +217,12 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 func TestSubscribeFuncConvenience(t *testing.T) {
 	engine := NewEngine(nil, nil, nil, nil)
 
-	called := false
+	called := make(chan struct{}, 1)
 	err := engine.SubscribeFunc("test", func(change StateChange) {
-		called = true
+		select {
+		case called <- struct{}{}:
+		default:
+		}
 	})
 	require.NoError(t, err)
 
@@ -230,9 +233,11 @@ func TestSubscribeFuncConvenience(t *testing.T) {
 		CurrentState:  models.AgentStateWorking,
 	})
 
-	// Give goroutine time to execute
-	time.Sleep(10 * time.Millisecond)
-	assert.True(t, called, "subscriber function should have been called")
+	select {
+	case <-called:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("subscriber function should have been called")
+	}
 }
 
 // TestNotifySubscribersConcurrency tests concurrent subscriber notifications.
@@ -278,7 +283,7 @@ func TestNotifySubscribersConcurrency(t *testing.T) {
 func TestSubscriberPanicRecovery(t *testing.T) {
 	engine := NewEngine(nil, nil, nil, nil)
 
-	goodCalled := false
+	goodCalled := make(chan struct{}, 1)
 
 	// Add a panicking subscriber
 	err := engine.SubscribeFunc("panicker", func(change StateChange) {
@@ -288,7 +293,10 @@ func TestSubscriberPanicRecovery(t *testing.T) {
 
 	// Add a good subscriber
 	err = engine.SubscribeFunc("good", func(change StateChange) {
-		goodCalled = true
+		select {
+		case goodCalled <- struct{}{}:
+		default:
+		}
 	})
 	require.NoError(t, err)
 
@@ -299,8 +307,11 @@ func TestSubscriberPanicRecovery(t *testing.T) {
 		CurrentState:  models.AgentStateWorking,
 	})
 
-	time.Sleep(20 * time.Millisecond)
-	assert.True(t, goodCalled, "good subscriber should still be called despite panic")
+	select {
+	case <-goodCalled:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("good subscriber should still be called despite panic")
+	}
 }
 
 // TestStateChangeStruct tests StateChange field population.

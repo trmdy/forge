@@ -16,6 +16,8 @@ var (
 	date    = "unknown"
 )
 
+var _ = []string{commit, date}
+
 func main() {
 	if err := fmail.Execute(version); err != nil {
 		var exitErr *fmail.ExitError

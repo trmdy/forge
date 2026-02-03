@@ -53,7 +53,9 @@ func init() {
 	nodeAddCmd.Flags().BoolVar(&nodeAddLocal, "local", false, "mark as local node (no SSH)")
 	nodeAddCmd.Flags().StringVar(&nodeAddKeyPath, "key", "", "path to SSH private key")
 	nodeAddCmd.Flags().BoolVar(&nodeAddNoTest, "no-test", false, "skip connection test")
-	nodeAddCmd.MarkFlagRequired("name")
+	if err := nodeAddCmd.MarkFlagRequired("name"); err != nil {
+		panic(err)
+	}
 
 	// Remove flags
 	nodeRemoveCmd.Flags().BoolVarP(&nodeRemoveForce, "force", "f", false, "force removal even with workspaces")

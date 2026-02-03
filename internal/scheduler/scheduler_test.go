@@ -22,9 +22,9 @@ type mockAgentService struct {
 	messages      map[string][]string
 	pausedAgents  map[string]time.Duration
 	resumedAgents map[string]bool
-	sendError     error
-	pauseError    error
-	listError     error
+	sendError     error //nolint:unused // reserved for future tests
+	pauseError    error //nolint:unused // reserved for future tests
+	listError     error //nolint:unused // reserved for future tests
 }
 
 func newMockAgentService() *mockAgentService {
@@ -385,7 +385,11 @@ func TestScheduler_PauseResume(t *testing.T) {
 	if err := sched.Start(ctx); err != nil {
 		t.Fatalf("failed to start scheduler: %v", err)
 	}
-	defer sched.Stop()
+	defer func() {
+		if err := sched.Stop(); err != nil {
+			t.Errorf("unexpected stop error: %v", err)
+		}
+	}()
 
 	// Pause scheduler
 	if err := sched.Pause(); err != nil {
@@ -442,7 +446,11 @@ func TestScheduler_ScheduleNow_Paused(t *testing.T) {
 	if err := sched.Start(ctx); err != nil {
 		t.Fatalf("failed to start: %v", err)
 	}
-	defer sched.Stop()
+	defer func() {
+		if err := sched.Stop(); err != nil {
+			t.Errorf("unexpected stop error: %v", err)
+		}
+	}()
 
 	if err := sched.Pause(); err != nil {
 		t.Fatalf("failed to pause: %v", err)
@@ -570,8 +578,14 @@ func TestScheduler_IsEligibleForDispatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.paused {
-				sched.PauseAgent(tt.agent.ID)
-				defer sched.ResumeAgent(tt.agent.ID)
+				if err := sched.PauseAgent(tt.agent.ID); err != nil {
+					t.Fatalf("unexpected pause error: %v", err)
+				}
+				defer func(agentID string) {
+					if err := sched.ResumeAgent(agentID); err != nil {
+						t.Errorf("unexpected resume error: %v", err)
+					}
+				}(tt.agent.ID)
 			}
 
 			got := sched.isEligibleForDispatch(tt.agent)
@@ -683,7 +697,11 @@ func TestScheduler_ScheduleNow_Running(t *testing.T) {
 	if err := sched.Start(ctx); err != nil {
 		t.Fatalf("failed to start: %v", err)
 	}
-	defer sched.Stop()
+	defer func() {
+		if err := sched.Stop(); err != nil {
+			t.Errorf("unexpected stop error: %v", err)
+		}
+	}()
 
 	// Should succeed even with nil agent service (dispatch will just fail gracefully)
 	if err := sched.ScheduleNow("agent-1"); err != nil {
@@ -1051,7 +1069,7 @@ func TestScheduler_ConcurrentDispatchPrevention(t *testing.T) {
 
 	// The dequeue count should match the number of items processed,
 	// not the number of dispatch attempts
-	dequeues := queueSvc.dequeueCalls
+	dequeues := queueSvc.dequeueCount()
 	queueLen := queueSvc.queueLength(agentID)
 
 	t.Logf("Dispatch attempts: %d, Dequeue calls: %d, Remaining queue: %d", dispatchAttempts, dequeues, queueLen)
@@ -1120,4 +1138,12 @@ func TestScheduler_ConcurrentDispatchDifferentAgents(t *testing.T) {
 	// Cleanup
 	sched.unlockAgentDispatch(agent1)
 	sched.unlockAgentDispatch(agent2)
+}
+
+var _ = []any{
+	mockAgentService{},
+	newMockAgentService,
+	(*mockAgentService).addAgent,
+	(*mockAgentService).getMessages,
+	createPauseItem,
 }

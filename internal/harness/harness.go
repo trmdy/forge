@@ -1,12 +1,14 @@
 package harness
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/tOgg1/forge/internal/models"
@@ -35,6 +37,12 @@ func BuildExecution(ctx context.Context, profile models.Profile, promptPath, pro
 		promptMode = models.PromptModeEnv
 	}
 
+	codexConfig := ""
+	if profile.Harness == models.HarnessCodex {
+		codexConfig = resolveCodexConfigPath(profile)
+		command = applyCodexSandbox(command, codexConfig)
+	}
+
 	switch promptMode {
 	case models.PromptModePath:
 		if promptPath == "" {
@@ -50,7 +58,7 @@ func BuildExecution(ctx context.Context, profile models.Profile, promptPath, pro
 	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
 	stdin := io.Reader(nil)
 
-	env := baseEnv(profile, promptMode, promptContent)
+	env := baseEnv(profile, promptMode, promptContent, codexConfig)
 	cmd.Env = env
 	if promptMode == models.PromptModeStdin {
 		stdin = strings.NewReader(promptContent)
@@ -60,7 +68,7 @@ func BuildExecution(ctx context.Context, profile models.Profile, promptPath, pro
 	return &Execution{Cmd: cmd, Stdin: stdin, Env: env}, nil
 }
 
-func baseEnv(profile models.Profile, mode models.PromptMode, promptContent string) []string {
+func baseEnv(profile models.Profile, mode models.PromptMode, promptContent, codexConfig string) []string {
 	env := append([]string{}, defaultEnv()...)
 
 	if profile.AuthHome != "" {
@@ -82,6 +90,10 @@ func baseEnv(profile models.Profile, mode models.PromptMode, promptContent strin
 		env = append(env, "FORGE_PROMPT_CONTENT="+promptContent)
 	}
 
+	if codexConfig != "" {
+		env = append(env, "CODEX_CONFIG="+codexConfig)
+	}
+
 	if profile.Harness == models.HarnessPi && profile.AuthHome != "" {
 		env = append(env, "PI_CODING_AGENT_DIR="+profile.AuthHome)
 	}
@@ -99,4 +111,120 @@ func baseEnv(profile models.Profile, mode models.PromptMode, promptContent strin
 
 func defaultEnv() []string {
 	return os.Environ()
+}
+
+func resolveCodexConfigPath(profile models.Profile) string {
+	candidates := []string{}
+	if profile.Env != nil {
+		if configPath := profile.Env["CODEX_CONFIG"]; configPath != "" {
+			candidates = append(candidates, configPath)
+		}
+	}
+	if configPath := os.Getenv("CODEX_CONFIG"); configPath != "" {
+		candidates = append(candidates, configPath)
+	}
+	if profile.AuthHome != "" {
+		candidates = append(candidates, filepath.Join(profile.AuthHome, "config.toml"))
+	}
+
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		candidates = append(candidates, filepath.Join(home, ".codex", "config.toml"))
+	}
+
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func detectCodexSandbox(configPath string) string {
+	if configPath == "" {
+		return ""
+	}
+
+	file, err := os.Open(configPath)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
+			continue
+		}
+		if strings.HasPrefix(line, "sandbox_mode") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			value := strings.TrimSpace(parts[1])
+			value = strings.Trim(value, "\"")
+			return value
+		}
+	}
+	return ""
+}
+
+func applyCodexSandbox(command string, codexConfig string) string {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return trimmed
+	}
+
+	sandbox := detectCodexSandbox(codexConfig)
+	if sandbox == "" {
+		return trimmed
+	}
+
+	tokens := strings.Fields(trimmed)
+	if len(tokens) == 0 {
+		return trimmed
+	}
+
+	// --full-auto forces workspace-write, so remove it when a stricter sandbox is configured.
+	if sandbox != "workspace-write" {
+		tokens = filterTokens(tokens, map[string]struct{}{"--full-auto": {}})
+	}
+
+	// When sandbox_mode is configured, drop the bypass flag so config wins.
+	tokens = filterTokens(tokens, map[string]struct{}{"--dangerously-bypass-approvals-and-sandbox": {}})
+
+	if hasSandboxFlag(tokens) || sandbox == "workspace-write" {
+		return strings.Join(tokens, " ")
+	}
+
+	if len(tokens) > 0 && tokens[len(tokens)-1] == "-" {
+		tokens = append(tokens[:len(tokens)-1], "--sandbox", sandbox, "-")
+		return strings.Join(tokens, " ")
+	}
+	tokens = append(tokens, "--sandbox", sandbox)
+	return strings.Join(tokens, " ")
+}
+
+func filterTokens(tokens []string, remove map[string]struct{}) []string {
+	if len(remove) == 0 {
+		return tokens
+	}
+	out := tokens[:0]
+	for _, token := range tokens {
+		if _, ok := remove[token]; ok {
+			continue
+		}
+		out = append(out, token)
+	}
+	return out
+}
+
+func hasSandboxFlag(tokens []string) bool {
+	for _, token := range tokens {
+		if token == "--sandbox" || strings.HasPrefix(token, "--sandbox=") {
+			return true
+		}
+	}
+	return false
 }

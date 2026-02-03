@@ -3,6 +3,7 @@
 
 # Build outputs
 build/
+logs/
 
 # Go temporary files
 *.test

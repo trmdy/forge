@@ -2,6 +2,7 @@
 package scheduler
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -426,7 +427,7 @@ func processConditionalItem(
 	}
 
 	evaluator := NewConditionEvaluator()
-	result, err := evaluator.Evaluate(nil, condCtx, payload)
+	result, err := evaluator.Evaluate(context.TODO(), condCtx, payload)
 	if err != nil {
 		return []TickAction{{
 			Type:     ActionTypeSkip,
@@ -457,3 +458,5 @@ func processConditionalItem(
 		Reason:   "condition met: " + result.Reason,
 	}}
 }
+
+var _ = checkEligibility

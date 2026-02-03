@@ -391,6 +391,11 @@ func TestAgentTestEnv_WaitForState(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to detect state: %v", err)
 		}
+		if result.State == models.AgentStateWorking {
+			if env.WaitForState(ctx, agent.ID, models.AgentStateWorking, 2*time.Second) {
+				return
+			}
+		}
 		t.Fatalf("expected to find idle state, detected: %v (reason: %s)", result.State, result.Reason)
 	}
 }

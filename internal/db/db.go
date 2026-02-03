@@ -52,10 +52,7 @@ func Open(cfg Config) (*DB, error) {
 	}
 
 	// Ensure directory exists
-	dir := filepath.Dir(cfg.Path)
-	if dir != "." && dir != "" {
-		// Directory creation should be handled by config.EnsureDirectories
-	}
+	_ = filepath.Dir(cfg.Path)
 
 	// Build connection string with pragmas
 	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)",

@@ -235,7 +235,9 @@ func (e *NativeExecutor) Exec(ctx context.Context, cmd string) (stdout, stderr [
 
 	select {
 	case <-ctx.Done():
-		session.Signal(xssh.SIGKILL)
+		if err := session.Signal(xssh.SIGKILL); err != nil {
+			e.logger.Debug().Err(err).Msg("failed to signal ssh session")
+		}
 		return nil, nil, ctx.Err()
 	case err := <-done:
 		stdout = stdoutBuf.Bytes()
@@ -271,7 +273,9 @@ func (e *NativeExecutor) ExecInteractive(ctx context.Context, cmd string, stdin 
 
 	select {
 	case <-ctx.Done():
-		session.Signal(xssh.SIGKILL)
+		if err := session.Signal(xssh.SIGKILL); err != nil {
+			e.logger.Debug().Err(err).Msg("failed to signal ssh session")
+		}
 		return ctx.Err()
 	case err := <-done:
 		if err != nil {
@@ -565,7 +569,9 @@ func (s *NativeSession) Exec(ctx context.Context, cmd string) (stdout, stderr []
 
 	select {
 	case <-ctx.Done():
-		session.Signal(xssh.SIGKILL)
+		if err := session.Signal(xssh.SIGKILL); err != nil {
+			s.executor.logger.Debug().Err(err).Msg("failed to signal ssh session")
+		}
 		return nil, nil, ctx.Err()
 	case err := <-done:
 		stdout = stdoutBuf.Bytes()
@@ -594,7 +600,9 @@ func (s *NativeSession) ExecInteractive(ctx context.Context, cmd string, stdin i
 
 	select {
 	case <-ctx.Done():
-		session.Signal(xssh.SIGKILL)
+		if err := session.Signal(xssh.SIGKILL); err != nil {
+			s.executor.logger.Debug().Err(err).Msg("failed to signal ssh session")
+		}
 		return ctx.Err()
 	case err := <-done:
 		if err != nil {

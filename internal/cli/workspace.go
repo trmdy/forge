@@ -66,15 +66,21 @@ func init() {
 	wsCreateCmd.Flags().StringVar(&wsCreateName, "name", "", "workspace name (default: derived from path)")
 	wsCreateCmd.Flags().StringVar(&wsCreateSession, "session", "", "tmux session name (default: auto-generated)")
 	wsCreateCmd.Flags().BoolVar(&wsCreateNoTmux, "no-tmux", false, "don't create tmux session")
-	wsCreateCmd.MarkFlagRequired("path")
+	if err := wsCreateCmd.MarkFlagRequired("path"); err != nil {
+		panic(err)
+	}
 
 	// Import flags
 	wsImportCmd.Flags().StringVar(&wsImportSession, "session", "", "tmux session name (required)")
 	wsImportCmd.Flags().StringVar(&wsImportNode, "node", "", "node name or ID (required)")
 	wsImportCmd.Flags().StringVar(&wsImportName, "name", "", "workspace name (default: session name)")
 	wsImportCmd.Flags().StringVar(&wsImportRepoPath, "repo-path", "", "repository path override (use when multiple repos are detected)")
-	wsImportCmd.MarkFlagRequired("session")
-	wsImportCmd.MarkFlagRequired("node")
+	if err := wsImportCmd.MarkFlagRequired("session"); err != nil {
+		panic(err)
+	}
+	if err := wsImportCmd.MarkFlagRequired("node"); err != nil {
+		panic(err)
+	}
 
 	// List flags
 	wsListCmd.Flags().StringVar(&wsListNode, "node", "", "filter by node")

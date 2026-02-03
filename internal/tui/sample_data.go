@@ -321,3 +321,13 @@ func sampleMailboxThreads() []mailThread {
 		},
 	}
 }
+
+var _ = []any{
+	sampleTranscriptLines,
+	sampleTranscript,
+	sampleQueueEditors,
+	sampleQueueItems,
+	sampleApprovals,
+	sampleAuditItems,
+	sampleMailboxThreads,
+}

@@ -483,6 +483,8 @@ func (v *Vault) ExportSecretNames() ([]string, error) {
 // GenerateSecretName generates a unique secret name with the given prefix.
 func GenerateSecretName(prefix string) string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+	}
 	return prefix + "-" + hex.EncodeToString(b)
 }

@@ -185,7 +185,7 @@ func watchConnected(ctx context.Context, runtime *Runtime, target watchTarget, o
 			}
 			return &watchFallback{scanStart: start}, nil
 		}
-		reconnectUntil = time.Time{}
+		reconnectUntil = time.Time{} //nolint:staticcheck // reset reconnect window after success
 		reconnectAttempts = 0
 
 		if !opts.deadline.IsZero() {

@@ -26,6 +26,8 @@ func mockSSHExecutorErrFunc(err error) func(*models.Node) (ssh.Executor, error) 
 	}
 }
 
+var _ = mockSSHExecutorErrFunc
+
 func TestNewClient_SSHMode(t *testing.T) {
 	mockExec := mocks.NewSSHExecutor()
 	// Mock successful SSH test command

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -461,7 +462,9 @@ func ParseSSHTarget(target string) (user, host string, port int) {
 		host = target
 	} else {
 		host = h
-		fmt.Sscanf(p, "%d", &port)
+		if parsed, err := strconv.Atoi(p); err == nil {
+			port = parsed
+		}
 	}
 
 	return user, host, port

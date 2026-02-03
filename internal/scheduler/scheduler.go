@@ -531,7 +531,9 @@ func (s *Scheduler) checkAutoResume(ctx context.Context, agents []*models.Agent)
 					s.logger.Warn().Err(err).Str("agent_id", a.ID).Msg("failed to auto-resume agent")
 				} else {
 					// Also resume in scheduler
-					s.ResumeAgent(a.ID)
+					if err := s.ResumeAgent(a.ID); err != nil {
+						s.logger.Warn().Err(err).Str("agent_id", a.ID).Msg("failed to resume agent in scheduler")
+					}
 				}
 			}
 		}
@@ -821,7 +823,9 @@ func (s *Scheduler) dispatchPause(ctx context.Context, agentID string, item *mod
 	}
 
 	// Also pause in scheduler
-	s.PauseAgent(agentID)
+	if err := s.PauseAgent(agentID); err != nil {
+		s.logger.Warn().Err(err).Str("agent_id", agentID).Msg("failed to pause agent in scheduler")
+	}
 
 	s.logger.Debug().
 		Str("agent_id", agentID).

@@ -466,6 +466,8 @@ func (e *Engine) logStateChange(ctx context.Context, agentID string, oldState, n
 	return e.eventRepo.Create(ctx, event)
 }
 
+var _ = (*Engine).logStateChange
+
 func buildStateChangeEvent(agentID string, oldState, newState models.AgentState, info models.StateInfo, timestamp time.Time) (*models.Event, error) {
 	payload := models.StateChangedPayload{
 		OldState:   oldState,

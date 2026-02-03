@@ -1,6 +1,6 @@
 # Forge CLI Reference
 
-This document describes the loop-centric CLI surface.
+This document describes the loop-centric CLI surface and the emerging workflow/job layout.
 
 ## Global usage
 
@@ -19,6 +19,34 @@ forge [flags] [command]
 - `-v, --verbose`: Enable debug logging.
 - `--log-level <level>`: Override logging level (`debug`, `info`, `warn`, `error`).
 - `--log-format <format>`: Override logging format (`json`, `console`).
+
+## CLI structure (proposed, incremental)
+
+Keep backward compatibility. Existing top-level loop commands stay, but map to `forge loop ...`.
+
+Canonical groups:
+
+- `forge loop ...` (aliases: `forge up/ps/msg/stop/...`)
+- `forge workflow ...`
+- `forge job ...`
+- `forge trigger ...`
+- `forge node ...`
+- `forge mesh ...`
+
+Alias mapping:
+
+- `forge up` -> `forge loop up`
+- `forge ps` -> `forge loop ps`
+- `forge msg` -> `forge loop msg`
+- `forge logs` -> `forge loop logs`
+- `forge stop` -> `forge loop stop`
+- `forge kill` -> `forge loop kill`
+- `forge resume` -> `forge loop resume`
+- `forge rm` -> `forge loop rm`
+- `forge prune` -> `forge loop prune`
+- `forge scale` -> `forge loop scale`
+- `forge queue` -> `forge loop queue`
+- `forge run` -> `forge loop run`
 
 ## Core commands
 
@@ -51,7 +79,7 @@ forge config init --force  # Overwrite existing config
 forge config path          # Print config file path
 ```
 
-### `forge up`
+### `forge loop up` (alias: `forge up`)
 
 Start loop(s) in the current repo.
 
@@ -62,7 +90,7 @@ forge up --pool default --interval 30s --tags review
 forge up --max-iterations 10 --max-runtime 2h
 ```
 
-### `forge ps`
+### `forge loop ps` (alias: `forge ps`)
 
 List loops.
 
@@ -72,7 +100,7 @@ forge ps --state running
 forge ps --pool default
 ```
 
-### `forge logs`
+### `forge loop logs` (alias: `forge logs`)
 
 Tail loop logs.
 
@@ -82,7 +110,7 @@ forge logs review-loop -f
 forge logs --all
 ```
 
-### `forge msg`
+### `forge loop msg` (alias: `forge msg`)
 
 Queue a message or override for a loop.
 
@@ -94,7 +122,7 @@ forge msg review-loop --template stop-and-refocus --var reason=scope
 forge msg review-loop --seq review-seq --var mode=fast
 ```
 
-### `forge stop` / `forge kill`
+### `forge loop stop` / `forge loop kill` (aliases: `forge stop` / `forge kill`)
 
 Stop or kill loops.
 
@@ -104,7 +132,7 @@ forge kill review-loop
 forge stop --pool default
 ```
 
-### `forge resume`
+### `forge loop resume` (alias: `forge resume`)
 
 Resume a stopped or errored loop.
 
@@ -112,7 +140,7 @@ Resume a stopped or errored loop.
 forge resume review-loop
 ```
 
-### `forge rm`
+### `forge loop rm` (alias: `forge rm`)
 
 Remove loop records (DB only). Logs and ledgers remain on disk. Use `--force` for selectors or running loops.
 
@@ -122,7 +150,7 @@ forge rm --state stopped --force
 forge rm --all --force
 ```
 
-### `forge prune`
+### `forge loop prune` (alias: `forge prune`)
 
 Remove inactive loop records (stopped or errored). Logs and ledgers remain on disk.
 
@@ -132,7 +160,7 @@ forge prune --repo .
 forge prune --pool default
 ```
 
-### `forge scale`
+### `forge loop scale` (alias: `forge scale`)
 
 Scale loops to a target count.
 
@@ -142,7 +170,7 @@ forge scale --count 0 --kill
 forge scale --count 2 --max-iterations 5 --max-runtime 1h
 ```
 
-### `forge queue`
+### `forge loop queue` (alias: `forge queue`)
 
 Inspect or reorder the loop queue.
 
@@ -153,7 +181,7 @@ forge queue rm review-loop <item-id>
 forge queue move review-loop <item-id> --to front
 ```
 
-### `forge run`
+### `forge loop run` (alias: `forge run`)
 
 Run a single iteration for a loop.
 
@@ -202,7 +230,7 @@ Manage harness profiles.
 
 ```bash
 forge profile ls
-forge profile import-aliases
+forge profile init
 forge profile add pi --name local
 forge profile edit local --max-concurrency 2
 forge profile cooldown set local --until 30m
@@ -219,4 +247,65 @@ forge pool create default
 forge pool add default oc1 oc2
 forge pool set-default default
 forge pool show default
+```
+
+## Workflow and job commands (planned)
+
+### `forge workflow`
+
+Run and inspect workflows (DAG of steps).
+
+```bash
+forge workflow ls
+forge workflow show <name>
+forge workflow validate <name>
+forge workflow run <name> --input repo=.
+forge workflow graph <name> --format dot
+```
+
+### `forge job`
+
+Run higher-level jobs that can start workflows or dispatch work.
+
+```bash
+forge job ls
+forge job show <name>
+forge job run <name> --input repo=.
+forge job logs <job-id>
+forge job cancel <job-id>
+```
+
+### `forge trigger`
+
+Attach triggers to jobs (cron or webhook).
+
+```bash
+forge trigger ls
+forge trigger add cron:0 2 * * * --job nightly-qa
+forge trigger add webhook:/hooks/ship --job spec-to-ship
+forge trigger rm <trigger-id>
+```
+
+### `forge node`
+
+Manage nodes in the mesh.
+
+```bash
+forge node ls
+forge node add --ssh user@host --name <node>
+forge node bootstrap --ssh root@host
+forge node exec <node> -- <cmd>
+forge node doctor <node>
+```
+
+### `forge mesh`
+
+Inspect or change mesh master.
+
+```bash
+forge mesh status
+forge mesh promote <node>
+forge mesh demote <node>
+forge mesh join <mesh-id>
+forge mesh leave
 ```

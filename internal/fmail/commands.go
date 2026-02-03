@@ -116,6 +116,8 @@ func runNotImplemented(cmd *cobra.Command, args []string) error {
 	return Exitf(ExitCodeFailure, "%s not implemented", cmd.Name())
 }
 
+var _ = runNotImplemented
+
 func argsRange(min, max int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		if len(args) < min || len(args) > max {

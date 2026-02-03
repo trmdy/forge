@@ -45,7 +45,7 @@ func init() {
 	profileCmd.AddCommand(profileAddCmd)
 	profileCmd.AddCommand(profileEditCmd)
 	profileCmd.AddCommand(profileRemoveCmd)
-	profileCmd.AddCommand(profileImportAliasesCmd)
+	profileCmd.AddCommand(profileInitCmd)
 	profileCmd.AddCommand(profileDoctorCmd)
 	profileCmd.AddCommand(profileCooldownCmd)
 

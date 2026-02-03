@@ -1,0 +1,5 @@
+# Invalid fixture: missing name
+[[steps]]
+id = "only"
+type = "bash"
+cmd = "echo hi"

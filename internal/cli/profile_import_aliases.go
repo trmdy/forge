@@ -17,13 +17,15 @@ import (
 	"github.com/tOgg1/forge/internal/models"
 )
 
-var profileImportAliasesCmd = &cobra.Command{
-	Use:   "import-aliases [alias...]",
-	Short: "Import profiles from shell aliases",
-	Args:  cobra.ArbitraryArgs,
+var profileInitCmd = &cobra.Command{
+	Use:     "init [alias...]",
+	Aliases: []string{"import-aliases"},
+	Short:   "Initialize profiles from shell aliases",
+	Args:    cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aliasNames := args
 		aliasFiles := resolveAliasFiles()
+		usingDefaultAliasFiles := strings.TrimSpace(os.Getenv("FORGE_ALIAS_FILE")) == ""
 		shellPath := resolveAliasShell()
 		aliasEntries := collectAliasEntries(aliasFiles)
 		aliasOutputs := make(map[string]string, len(aliasEntries))
@@ -32,8 +34,13 @@ var profileImportAliasesCmd = &cobra.Command{
 		}
 
 		if len(aliasNames) == 0 {
-			for _, entry := range filterHarnessAliases(aliasEntries) {
-				aliasNames = append(aliasNames, entry.Name)
+			aliasNames = appendAliasNames(aliasNames, filterHarnessAliases(aliasEntries))
+			if usingDefaultAliasFiles {
+				defaultEntries := detectDefaultHarnessAliases(aliasOutputs)
+				for _, entry := range defaultEntries {
+					aliasOutputs[entry.Name] = entry.Output
+				}
+				aliasNames = appendAliasNames(aliasNames, defaultEntries)
 			}
 		}
 
@@ -406,6 +413,72 @@ func filterHarnessAliases(entries []aliasEntry) []aliasEntry {
 	return filtered
 }
 
+func appendAliasNames(names []string, entries []aliasEntry) []string {
+	if len(entries) == 0 {
+		return names
+	}
+	seen := make(map[string]struct{}, len(names)+len(entries))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		seen[name] = struct{}{}
+	}
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names
+}
+
+type harnessCandidate struct {
+	Name     string
+	Commands []string
+}
+
+func detectDefaultHarnessAliases(existing map[string]string) []aliasEntry {
+	candidates := []harnessCandidate{
+		{Name: "codex", Commands: []string{"codex"}},
+		{Name: "claude", Commands: []string{"claude", "claude-code"}},
+		{Name: "opencode", Commands: []string{"opencode"}},
+		{Name: "pi", Commands: []string{"pi"}},
+		{Name: "droid", Commands: []string{"droid"}},
+	}
+
+	entries := make([]aliasEntry, 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, ok := existing[candidate.Name]; ok {
+			continue
+		}
+		output := ""
+		for _, cmd := range candidate.Commands {
+			if cmd == "" {
+				continue
+			}
+			if _, err := exec.LookPath(cmd); err == nil {
+				output = cmd
+				break
+			}
+		}
+		if output == "" {
+			continue
+		}
+		entries = append(entries, aliasEntry{
+			Name:   candidate.Name,
+			Output: output,
+		})
+	}
+	return entries
+}
+
 func findAliasInFile(aliasFile, aliasName string) string {
 	data, err := os.ReadFile(aliasFile)
 	if err != nil {
@@ -517,7 +590,7 @@ func isHarnessAlias(aliasCmd string) bool {
 
 func isHarnessToken(token string) bool {
 	switch token {
-	case "opencode", "codex", "claude", "claude-code", "pi":
+	case "opencode", "codex", "claude", "claude-code", "pi", "droid":
 		return true
 	default:
 		return false

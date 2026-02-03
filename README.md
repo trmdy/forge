@@ -55,8 +55,8 @@ Homebrew (macOS) can be wired once a tap repo is chosen.
 forge init
 
 # 2) Import aliases (or add a profile manually)
-# Scans common shell alias files for claude/codex/opencode/pi aliases.
-forge profile import-aliases
+# Scans common shell alias files and detects installed harnesses (claude/codex/opencode/pi/droid).
+forge profile init
 # forge profile add pi --name local
 
 # 3) Create a pool and add profiles

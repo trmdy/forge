@@ -367,6 +367,7 @@ func (r *Runner) runWithInterrupt(ctx context.Context, loop *models.Loop, run *m
 	interruptCh := make(chan interruptResult, 1)
 
 	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
 	watchCtx, watchCancel := context.WithCancel(ctx)
 	defer watchCancel()
 

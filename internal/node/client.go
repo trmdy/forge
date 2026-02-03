@@ -61,7 +61,7 @@ type clientOpts struct {
 	logger          zerolog.Logger
 	mode            ClientMode
 	daemonPort      int
-	sshOptions      []ssh.NativeExecutorOption
+	sshOptions      []ssh.NativeExecutorOption //nolint:unused // reserved for future SSH options
 	daemonTimeout   time.Duration
 	preferDaemon    bool
 	sshExecutorFunc func(*models.Node) (ssh.Executor, error)

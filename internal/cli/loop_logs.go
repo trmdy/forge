@@ -160,7 +160,9 @@ func followFile(path string, lines int) error {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			time.Sleep(250 * time.Millisecond)
-			file.Seek(offset, io.SeekStart)
+			if _, seekErr := file.Seek(offset, io.SeekStart); seekErr != nil {
+				return seekErr
+			}
 			continue
 		}
 		offset += int64(len(line))

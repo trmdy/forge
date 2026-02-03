@@ -353,7 +353,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.logger.Error().Err(err).Msg("failed to start scheduler")
 			// Stop poller before returning
 			if d.statePoller != nil {
-				d.statePoller.Stop()
+				if stopErr := d.statePoller.Stop(); stopErr != nil {
+					d.logger.Warn().Err(stopErr).Msg("failed to stop state poller")
+				}
 			}
 			return fmt.Errorf("failed to start scheduler: %w", err)
 		}

@@ -58,7 +58,9 @@ func TestMailServerSendWatch(t *testing.T) {
 	}
 	defer watchConn.Close()
 	watchReader := bufio.NewReader(watchConn)
-	watchConn.SetDeadline(time.Now().Add(2 * time.Second))
+	if err := watchConn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("watch deadline: %v", err)
+	}
 
 	watchReq := mailWatchRequest{
 		mailBaseRequest: mailBaseRequest{
@@ -105,7 +107,9 @@ func TestMailServerSendWatch(t *testing.T) {
 	}
 	defer sendConn.Close()
 	sendReader := bufio.NewReader(sendConn)
-	sendConn.SetDeadline(time.Now().Add(2 * time.Second))
+	if err := sendConn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("send deadline: %v", err)
+	}
 
 	sendReq := mailSendRequest{
 		mailBaseRequest: mailBaseRequest{

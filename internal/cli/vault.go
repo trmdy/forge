@@ -331,7 +331,9 @@ Examples:
 		if !vaultDeleteForce && !yesFlag && IsInteractive() {
 			fmt.Fprintf(os.Stderr, "Delete profile %q for %s? [y/N]: ", profileName, adapter)
 			var response string
-			fmt.Scanln(&response)
+			if _, err := fmt.Scanln(&response); err != nil {
+				return fmt.Errorf("failed to read response: %w", err)
+			}
 			if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
 				fmt.Fprintln(os.Stdout, "Deletion cancelled.")
 				return nil
@@ -520,7 +522,9 @@ Examples:
 		if !vaultClearForce && !yesFlag && IsInteractive() {
 			fmt.Fprintf(os.Stderr, "Remove %d auth file(s) for %s? [y/N]: ", len(existing), adapter)
 			var response string
-			fmt.Scanln(&response)
+			if _, err := fmt.Scanln(&response); err != nil {
+				return fmt.Errorf("failed to read response: %w", err)
+			}
 			if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
 				fmt.Fprintln(os.Stdout, "Clear cancelled.")
 				return nil

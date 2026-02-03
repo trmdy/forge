@@ -1,0 +1,8 @@
+# Invalid fixture: unknown dependency
+name = "bad-dep"
+
+[[steps]]
+id = "build"
+type = "bash"
+cmd = "echo build"
+depends_on = ["missing"]

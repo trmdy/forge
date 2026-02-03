@@ -1,0 +1,14 @@
+# Invalid fixture: cycle
+name = "cycle"
+
+[[steps]]
+id = "a"
+type = "bash"
+cmd = "echo a"
+depends_on = ["b"]
+
+[[steps]]
+id = "b"
+type = "bash"
+cmd = "echo b"
+depends_on = ["a"]

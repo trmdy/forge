@@ -329,7 +329,7 @@ event_retention:
 # Profiles (harness + auth combinations)
 # =============================================================================
 # Profiles are typically managed via 'forge profile' commands or imported
-# from shell aliases via 'forge profile import-aliases'.
+# from shell aliases via 'forge profile init'.
 #
 # Example profile definition:
 # profiles:

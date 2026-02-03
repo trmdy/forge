@@ -28,8 +28,12 @@ func init() {
 	nodeForwardCmd.Flags().StringVar(&nodeForwardRemote, "remote", "", "remote host:port to forward to (required)")
 	nodeForwardCmd.Flags().IntVar(&nodeForwardLocalPort, "local-port", 0, "local port to bind (required)")
 	nodeForwardCmd.Flags().StringVar(&nodeForwardLocalHost, "local-host", "127.0.0.1", "local host to bind")
-	nodeForwardCmd.MarkFlagRequired("remote")
-	nodeForwardCmd.MarkFlagRequired("local-port")
+	if err := nodeForwardCmd.MarkFlagRequired("remote"); err != nil {
+		panic(err)
+	}
+	if err := nodeForwardCmd.MarkFlagRequired("local-port"); err != nil {
+		panic(err)
+	}
 }
 
 var nodeForwardCmd = &cobra.Command{

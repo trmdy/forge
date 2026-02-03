@@ -35,6 +35,7 @@ This creates:
   - .forge/prompts/
   - .forge/templates/
   - .forge/sequences/
+  - .forge/workflows/
   - .forge/ledgers/
 
 Also ensures .fmail/ is in .gitignore (runtime messaging state).
@@ -65,6 +66,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		filepath.Join(forgeDir, "prompts"),
 		filepath.Join(forgeDir, "templates"),
 		filepath.Join(forgeDir, "sequences"),
+		filepath.Join(forgeDir, "workflows"),
 		filepath.Join(forgeDir, "ledgers"),
 	}
 
@@ -126,8 +128,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal init output: %w", err)
 		}
-		_, _ = io.WriteString(os.Stdout, string(data))
-		_, _ = io.WriteString(os.Stdout, "\n")
+		if _, err := os.Stdout.Write(data); err != nil {
+			return fmt.Errorf("failed to write init output: %w", err)
+		}
+		if _, err := os.Stdout.Write([]byte("\n")); err != nil {
+			return fmt.Errorf("failed to write init output: %w", err)
+		}
 		return nil
 	}
 

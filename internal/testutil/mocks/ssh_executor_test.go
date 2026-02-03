@@ -189,7 +189,9 @@ func TestSSHExecutor_Reset(t *testing.T) {
 	exec := NewSSHExecutor()
 	exec.SetResponse("test", []byte("output"), nil, nil)
 	exec.QueueResponse([]byte("queued"), nil, nil)
-	exec.Exec(context.Background(), "test")
+	if _, _, err := exec.Exec(context.Background(), "test"); err != nil {
+		t.Fatalf("unexpected exec error: %v", err)
+	}
 	exec.Close()
 
 	exec.Reset()
@@ -217,7 +219,9 @@ func TestSSHExecutor_Concurrent(t *testing.T) {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			exec.Exec(ctx, "concurrent cmd")
+			if _, _, err := exec.Exec(ctx, "concurrent cmd"); err != nil {
+				t.Errorf("unexpected exec error: %v", err)
+			}
 			done <- true
 		}()
 	}

@@ -470,6 +470,7 @@ func populateAgentFields(agent *models.Agent, agentType, state, confidence strin
 	if metadataJSON.Valid && metadataJSON.String != "" {
 		if err := json.Unmarshal([]byte(metadataJSON.String), &agent.Metadata); err != nil {
 			// If metadata is malformed, keep agent.Metadata empty.
+			agent.Metadata = models.AgentMetadata{}
 		}
 	}
 
