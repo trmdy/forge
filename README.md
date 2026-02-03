@@ -95,6 +95,26 @@ Runtime data (sqlite, logs, pids) stays in the machine-local data dir.
 Global config lives at `~/.config/forge/config.yaml`. Repo config lives at `.forge/forge.yaml`.
 See `docs/config.md` for details.
 
+## Agent Skills
+
+Install repo skills for configured harnesses with:
+
+```bash
+forge skills bootstrap
+```
+
+If a profile has no `auth_home`, skills are installed into repo-local harness
+folders (for example `.codex/skills/`). When `.agent-skills/` is missing, the
+CLI falls back to the embedded skills.
+
+Install skills into harness-specific locations with:
+
+```bash
+scripts/install-skills.sh
+```
+
+See `docs/skills.md` for details.
+
 ## CLI Reference
 
 See `docs/cli.md` for the full CLI surface.
