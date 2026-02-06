@@ -1,6 +1,6 @@
 {
   "schema_version": "sv.tasks.v1",
-  "generated_at": "2026-02-06T14:48:10.707988Z",
+  "generated_at": "2026-02-06T14:54:05.860683Z",
   "tasks": [
     {
       "id": "sv-w1c",
@@ -8,13 +8,43 @@
       "status": "closed",
       "priority": "P0",
       "created_at": "2026-02-06T14:01:01.536492Z",
-      "updated_at": "2026-02-06T14:48:10.699686Z",
+      "updated_at": "2026-02-06T14:54:05.851691Z",
       "body": "Improve the TUI for better user experience.\n",
       "workspace_id": "4793afab-07fc-4f81-8abf-76957155133c",
       "workspace": "forge",
       "branch": "main",
-      "started_at": "2026-02-06T14:41:00.892900Z",
-      "closed_at": "2026-02-06T14:48:10.699686Z",
+      "started_at": "2026-02-06T14:52:04.899687Z",
+      "closed_at": "2026-02-06T14:54:05.851691Z",
+      "comments_count": 0
+    },
+    {
+      "id": "sv-8a1",
+      "title": "TUI: Cover acceptance criterion 12 with non-TUI loop command regression tests",
+      "status": "closed",
+      "priority": "P2",
+      "created_at": "2026-02-06T14:52:04.910619Z",
+      "updated_at": "2026-02-06T14:54:05.821638Z",
+      "body": "Map AC12 from PRD_TUI.md into explicit regression checks.\\n\\nScope:\\n- Add tests for existing non-TUI loop command paths (stop/kill/resume and record deletion behavior) to ensure TUI changes did not alter semantics.\\n- Keep tests command/repository level and deterministic.\\n\\nDone when:\\n- test suite includes focused regression checks and passes.",
+      "workspace_id": "4793afab-07fc-4f81-8abf-76957155133c",
+      "workspace": "forge",
+      "branch": "main",
+      "started_at": "2026-02-06T14:53:57.686496Z",
+      "closed_at": "2026-02-06T14:54:05.821638Z",
+      "comments_count": 0
+    },
+    {
+      "id": "sv-y1t",
+      "title": "TUI: Cover acceptance criterion 11 (empty/error states) with tests",
+      "status": "closed",
+      "priority": "P2",
+      "created_at": "2026-02-06T14:52:04.904892Z",
+      "updated_at": "2026-02-06T14:54:05.793094Z",
+      "body": "Map AC11 from PRD_TUI.md into explicit tests.\\n\\nScope:\\n- Assert empty-state messaging explains how to start a loop.\\n- Assert error rendering path is resilient and visible.\\n- Keep tests focused on non-crash behavior and operator guidance text.\\n\\nDone when:\\n- internal/looptui tests cover AC11 expectations.",
+      "workspace_id": "4793afab-07fc-4f81-8abf-76957155133c",
+      "workspace": "forge",
+      "branch": "main",
+      "started_at": "2026-02-06T14:52:08.444566Z",
+      "closed_at": "2026-02-06T14:54:05.793094Z",
       "comments_count": 0
     },
     {

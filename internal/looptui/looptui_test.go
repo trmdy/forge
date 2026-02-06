@@ -2,6 +2,7 @@ package looptui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -207,6 +208,26 @@ func TestCreateLoopsWizardPath(t *testing.T) {
 	}
 	if selectedID != loops[0].ID {
 		t.Fatalf("selected id mismatch: got %s want %s", selectedID, loops[0].ID)
+	}
+}
+
+func TestViewEmptyStateGuidesLoopCreation(t *testing.T) {
+	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 8})
+	m.applyFilters("", 0)
+
+	out := m.View()
+	if !strings.Contains(out, "Start one: forge up --count 1") {
+		t.Fatalf("expected empty-state startup guidance, got:\n%s", out)
+	}
+}
+
+func TestViewRendersErrorStateWithoutCrashing(t *testing.T) {
+	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 8})
+	m.err = errors.New("boom")
+
+	out := m.View()
+	if !strings.Contains(out, "Error: boom") {
+		t.Fatalf("expected visible error rendering, got:\n%s", out)
 	}
 }
 
