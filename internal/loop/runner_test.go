@@ -356,6 +356,79 @@ func TestRunnerStopQueueStopsLoop(t *testing.T) {
 	}
 }
 
+func TestRunnerInjectsPersistentMemoryIntoPrompt(t *testing.T) {
+	database, cleanup := testutil.NewTestDB(t)
+	defer cleanup()
+
+	repoDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = t.TempDir()
+	cfg.Global.ConfigDir = t.TempDir()
+
+	profileRepo := db.NewProfileRepository(database)
+	loopRepo := db.NewLoopRepository(database)
+
+	profile := &models.Profile{
+		Name:            "mem-profile",
+		Harness:         models.HarnessPi,
+		PromptMode:      models.PromptModeEnv,
+		CommandTemplate: "pi -p \"$FORGE_PROMPT_CONTENT\"",
+		MaxConcurrency:  1,
+	}
+	if err := profileRepo.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	loopEntry := &models.Loop{
+		Name:            "loop-mem",
+		RepoPath:        repoDir,
+		BasePromptMsg:   "base",
+		IntervalSeconds: 1,
+		ProfileID:       profile.ID,
+		State:           models.LoopStateStopped,
+	}
+	if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	taskRepo := db.NewLoopTaskRepository(database)
+	if err := taskRepo.Create(context.Background(), &models.LoopTask{
+		LoopID: loopEntry.ID,
+		Key:    "wait-agent-b",
+		Title:  "Wait for response from agent-b",
+		Status: models.LoopTaskStatusBlocked,
+		Detail: "asked about schema mismatch",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	kvRepo := db.NewLoopKVRepository(database)
+	if err := kvRepo.Set(context.Background(), loopEntry.ID, "blocked_on", "agent-b reply"); err != nil {
+		t.Fatalf("set kv: %v", err)
+	}
+
+	var capturedPrompt string
+	runner := NewRunner(database, cfg)
+	runner.Exec = func(ctx context.Context, p models.Profile, promptPath, promptContent, workDir string, output io.Writer) (int, string, error) {
+		capturedPrompt = promptContent
+		return 0, "ok", nil
+	}
+
+	if err := runner.RunOnce(context.Background(), loopEntry.ID); err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+
+	if !strings.Contains(capturedPrompt, "Loop Memory (persistent)") {
+		t.Fatalf("expected memory section injected into prompt")
+	}
+	if !strings.Contains(capturedPrompt, "wait-agent-b") || !strings.Contains(capturedPrompt, "Wait for response from agent-b") {
+		t.Fatalf("expected task injected into prompt")
+	}
+	if !strings.Contains(capturedPrompt, "blocked_on") || !strings.Contains(capturedPrompt, "agent-b reply") {
+		t.Fatalf("expected kv injected into prompt")
+	}
+}
+
 func TestRunnerMaxIterationsStopsLoop(t *testing.T) {
 	database, cleanup := testutil.NewTestDB(t)
 	defer cleanup()
@@ -480,6 +553,149 @@ func TestRunnerMaxRuntimeStopsLoop(t *testing.T) {
 	}
 	if updated.State != models.LoopStateStopped {
 		t.Fatalf("expected loop stopped, got %s", updated.State)
+	}
+}
+
+func TestRunnerMaxIterationsStopsImmediatelyWithoutSleepCycle(t *testing.T) {
+	database, cleanup := testutil.NewTestDB(t)
+	defer cleanup()
+
+	repoDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = t.TempDir()
+	cfg.Global.ConfigDir = t.TempDir()
+
+	profileRepo := db.NewProfileRepository(database)
+	loopRepo := db.NewLoopRepository(database)
+	runRepo := db.NewLoopRunRepository(database)
+
+	profile := &models.Profile{
+		Name:            "iter-immediate-stop-profile",
+		Harness:         models.HarnessPi,
+		PromptMode:      models.PromptModeEnv,
+		CommandTemplate: "pi -p \"$FORGE_PROMPT_CONTENT\"",
+		MaxConcurrency:  1,
+	}
+	if err := profileRepo.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	loopEntry := &models.Loop{
+		Name:            "loop-max-iter-immediate-stop",
+		RepoPath:        repoDir,
+		BasePromptMsg:   "base",
+		IntervalSeconds: 3600,
+		MaxIterations:   1,
+		ProfileID:       profile.ID,
+		State:           models.LoopStateStopped,
+	}
+	if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	runner := NewRunner(database, cfg)
+	runner.Exec = func(ctx context.Context, profile models.Profile, promptPath, promptContent, workDir string, output io.Writer) (int, string, error) {
+		return 0, "ok", nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := runner.RunLoop(ctx, loopEntry.ID); err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+
+	runs, err := runRepo.ListByLoop(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+
+	updated, err := loopRepo.Get(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("get loop: %v", err)
+	}
+	if updated.State != models.LoopStateStopped {
+		t.Fatalf("expected loop stopped, got %s", updated.State)
+	}
+	if updated.LastExitCode == nil || *updated.LastExitCode != 0 {
+		t.Fatalf("expected last exit code 0, got %v", updated.LastExitCode)
+	}
+	if got := loopIterationCount(updated.Metadata); got != 1 {
+		t.Fatalf("expected iteration_count=1, got %d", got)
+	}
+}
+
+func TestRunnerMaxRuntimeStopsImmediatelyWithoutSleepCycle(t *testing.T) {
+	database, cleanup := testutil.NewTestDB(t)
+	defer cleanup()
+
+	repoDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = t.TempDir()
+	cfg.Global.ConfigDir = t.TempDir()
+
+	profileRepo := db.NewProfileRepository(database)
+	loopRepo := db.NewLoopRepository(database)
+	runRepo := db.NewLoopRunRepository(database)
+
+	profile := &models.Profile{
+		Name:            "runtime-immediate-stop-profile",
+		Harness:         models.HarnessPi,
+		PromptMode:      models.PromptModeEnv,
+		CommandTemplate: "pi -p \"$FORGE_PROMPT_CONTENT\"",
+		MaxConcurrency:  1,
+	}
+	if err := profileRepo.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	loopEntry := &models.Loop{
+		Name:              "loop-max-runtime-immediate-stop",
+		RepoPath:          repoDir,
+		BasePromptMsg:     "base",
+		IntervalSeconds:   3600,
+		MaxRuntimeSeconds: 1,
+		ProfileID:         profile.ID,
+		State:             models.LoopStateStopped,
+	}
+	if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	runner := NewRunner(database, cfg)
+	runner.Exec = func(ctx context.Context, profile models.Profile, promptPath, promptContent, workDir string, output io.Writer) (int, string, error) {
+		time.Sleep(1100 * time.Millisecond)
+		return 0, "ok", nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := runner.RunLoop(ctx, loopEntry.ID); err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+
+	runs, err := runRepo.ListByLoop(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+
+	updated, err := loopRepo.Get(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("get loop: %v", err)
+	}
+	if updated.State != models.LoopStateStopped {
+		t.Fatalf("expected loop stopped, got %s", updated.State)
+	}
+	if updated.LastExitCode == nil || *updated.LastExitCode != 0 {
+		t.Fatalf("expected last exit code 0, got %v", updated.LastExitCode)
+	}
+	if got := loopIterationCount(updated.Metadata); got != 1 {
+		t.Fatalf("expected iteration_count=1, got %d", got)
 	}
 }
 

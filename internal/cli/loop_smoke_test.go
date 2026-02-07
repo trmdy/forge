@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tOgg1/forge/internal/config"
@@ -46,6 +47,8 @@ func TestLoopCLIUpMsgLogs(t *testing.T) {
 	loopUpPrompt = ""
 	loopUpPromptMsg = ""
 	loopUpInterval = ""
+	loopUpMaxRuntime = "1m"
+	loopUpMaxIterations = 1
 	loopUpTags = ""
 
 	if err := loopUpCmd.RunE(loopUpCmd, nil); err != nil {
@@ -108,5 +111,65 @@ func TestLoopCLIUpMsgLogs(t *testing.T) {
 	}
 	if len(items) == 0 {
 		t.Fatalf("expected queued item")
+	}
+}
+
+func TestLoopCLIUpRejectsZeroLimits(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "PROMPT.md"), []byte("prompt"), 0o644); err != nil {
+		t.Fatalf("write PROMPT.md: %v", err)
+	}
+
+	originalCfg := appConfig
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = filepath.Join(tmpDir, "data")
+	cfg.Global.ConfigDir = filepath.Join(tmpDir, "config")
+	appConfig = cfg
+	defer func() { appConfig = originalCfg }()
+
+	if err := os.MkdirAll(cfg.Global.DataDir, 0o755); err != nil {
+		t.Fatalf("mkdir data dir: %v", err)
+	}
+
+	originalWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(originalWd) }()
+
+	originalStart := startLoopProcessFunc
+	startLoopProcessFunc = func(string) error { return nil }
+	defer func() { startLoopProcessFunc = originalStart }()
+
+	loopUpCount = 1
+	loopUpName = "reject-zero"
+	loopUpNamePrefix = ""
+	loopUpPool = ""
+	loopUpProfile = ""
+	loopUpPrompt = ""
+	loopUpPromptMsg = ""
+	loopUpInterval = ""
+	loopUpMaxRuntime = "1m"
+	loopUpMaxIterations = 0
+	loopUpTags = ""
+
+	err := loopUpCmd.RunE(loopUpCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "must be > 0") {
+		t.Fatalf("expected >0 validation error, got %v", err)
+	}
+
+	database, err := openDatabase()
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer database.Close()
+
+	loopRepo := db.NewLoopRepository(database)
+	loops, err := loopRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list loops: %v", err)
+	}
+	if len(loops) != 0 {
+		t.Fatalf("expected no loops created, got %d", len(loops))
 	}
 }

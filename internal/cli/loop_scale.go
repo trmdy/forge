@@ -37,7 +37,7 @@ func init() {
 	loopScaleCmd.Flags().StringVar(&loopScalePromptMsg, "prompt-msg", "", "base prompt content for each iteration")
 	loopScaleCmd.Flags().StringVar(&loopScaleInterval, "interval", "", "sleep interval")
 	loopScaleCmd.Flags().StringVarP(&loopScaleMaxRuntime, "max-runtime", "r", "", "max runtime before stopping (e.g., 30m, 2h)")
-	loopScaleCmd.Flags().IntVarP(&loopScaleMaxIterations, "max-iterations", "i", 0, "max iterations before stopping (0 = unlimited)")
+	loopScaleCmd.Flags().IntVarP(&loopScaleMaxIterations, "max-iterations", "i", 0, "max iterations before stopping (> 0 required for new loops)")
 	loopScaleCmd.Flags().StringVar(&loopScaleTags, "tags", "", "comma-separated tags")
 	loopScaleCmd.Flags().StringVar(&loopScaleNamePrefix, "name-prefix", "", "name prefix for new loops")
 	loopScaleCmd.Flags().BoolVar(&loopScaleKill, "kill", false, "kill extra loops instead of stopping")
@@ -151,6 +151,9 @@ var loopScaleCmd = &cobra.Command{
 		}
 
 		if len(loops) < loopScaleCount {
+			if loopScaleMaxIterations == 0 || maxRuntime == 0 {
+				return fmt.Errorf("max iterations and max runtime must be > 0 to create loops")
+			}
 			toCreate := loopScaleCount - len(loops)
 			existingNames := make(map[string]struct{}, len(loops))
 			for _, entry := range loops {

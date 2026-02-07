@@ -129,17 +129,7 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 			return ctx.Err()
 		}
 
-		if maxIterations > 0 && iterationCount >= maxIterations {
-			reason := fmt.Sprintf("max iterations reached (%d)", maxIterations)
-			logWriter.WriteLine(reason)
-			loop.State = models.LoopStateStopped
-			loop.LastError = reason
-			_ = loopRepo.Update(ctx, loop)
-			return nil
-		}
-
-		if maxRuntime > 0 && time.Since(startedAt) >= maxRuntime {
-			reason := fmt.Sprintf("max runtime reached (%s)", maxRuntime)
+		if reason, shouldStop := loopLimitReason(maxIterations, iterationCount, maxRuntime, startedAt); shouldStop {
 			logWriter.WriteLine(reason)
 			loop.State = models.LoopStateStopped
 			loop.LastError = reason
@@ -233,6 +223,14 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 		}
 
 		hasMessages := len(plan.Messages) > 0
+		if mem, err := buildLoopMemory(ctx, r.DB, loop.ID, 0); err == nil {
+			if strings.TrimSpace(mem) != "" {
+				prompt.Content = strings.TrimRight(prompt.Content, "\n") + mem
+			}
+		} else {
+			logWriter.WriteLine(fmt.Sprintf("memory injection failed: %v", err))
+		}
+
 		prompt.Content = appendOperatorMessages(prompt.Content, plan.Messages)
 
 		run := &models.LoopRun{
@@ -316,6 +314,14 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 			logWriter.WriteLine("graceful stop queued")
 			_ = consumePendingStop(ctx, queueRepo, loop.ID)
 			loop.State = models.LoopStateStopped
+			_ = loopRepo.Update(ctx, loop)
+			return nil
+		}
+
+		if reason, shouldStop := loopLimitReason(maxIterations, iterationCount, maxRuntime, startedAt); shouldStop {
+			logWriter.WriteLine(reason)
+			loop.State = models.LoopStateStopped
+			loop.LastError = reason
 			_ = loopRepo.Update(ctx, loop)
 			return nil
 		}
@@ -509,6 +515,16 @@ func setLoopStartedAt(loop *models.Loop, startedAt time.Time) {
 		loop.Metadata = make(map[string]any)
 	}
 	loop.Metadata["started_at"] = startedAt.UTC().Format(time.RFC3339)
+}
+
+func loopLimitReason(maxIterations, iterationCount int, maxRuntime time.Duration, startedAt time.Time) (string, bool) {
+	if maxIterations > 0 && iterationCount >= maxIterations {
+		return fmt.Sprintf("max iterations reached (%d)", maxIterations), true
+	}
+	if maxRuntime > 0 && time.Since(startedAt) >= maxRuntime {
+		return fmt.Sprintf("max runtime reached (%s)", maxRuntime), true
+	}
+	return "", false
 }
 
 func (r *Runner) sleep(ctx context.Context, duration time.Duration) {

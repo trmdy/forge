@@ -42,7 +42,7 @@ func init() {
 	loopUpCmd.Flags().StringVar(&loopUpPromptMsg, "prompt-msg", "", "base prompt content for each iteration")
 	loopUpCmd.Flags().StringVar(&loopUpInterval, "interval", "", "sleep interval (e.g., 30s, 2m)")
 	loopUpCmd.Flags().StringVarP(&loopUpMaxRuntime, "max-runtime", "r", "", "max runtime before stopping (e.g., 30m, 2h)")
-	loopUpCmd.Flags().IntVarP(&loopUpMaxIterations, "max-iterations", "i", 0, "max iterations before stopping (0 = unlimited)")
+	loopUpCmd.Flags().IntVarP(&loopUpMaxIterations, "max-iterations", "i", 0, "max iterations before stopping (> 0 required)")
 	loopUpCmd.Flags().StringVar(&loopUpTags, "tags", "", "comma-separated tags")
 }
 
@@ -83,6 +83,9 @@ var loopUpCmd = &cobra.Command{
 		}
 		if maxRuntime < 0 {
 			return fmt.Errorf("max runtime must be >= 0")
+		}
+		if loopUpMaxIterations == 0 || maxRuntime == 0 {
+			return fmt.Errorf("max iterations and max runtime must be > 0 to create loops")
 		}
 
 		basePromptMsg := strings.TrimSpace(loopUpPromptMsg)

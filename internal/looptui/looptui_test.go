@@ -186,7 +186,7 @@ func TestCreateLoopsWizardPath(t *testing.T) {
 		30*time.Second,
 		"",
 		"",
-		wizardValues{Name: "wizard-loop", Count: "1"},
+		wizardValues{Name: "wizard-loop", Count: "1", MaxRuntime: "1m", MaxIterations: "1"},
 	)
 	if err != nil {
 		t.Fatalf("create loops: %v", err)
