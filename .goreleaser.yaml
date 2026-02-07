@@ -1,3 +1,5 @@
+version: 2
+
 project_name: forge
 
 release:
@@ -76,16 +78,19 @@ builds:
 
 archives:
   - id: forge
-    builds:
+    ids:
       - forge
       - forged
       - forge-agent-runner
       - fmail
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    allow_different_binary_count: true
+    formats:
+      - tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
 
 checksum:
   name_template: checksums.txt
