@@ -391,15 +391,16 @@ func TestRunnerInjectsPersistentMemoryIntoPrompt(t *testing.T) {
 		t.Fatalf("create loop: %v", err)
 	}
 
-	taskRepo := db.NewLoopTaskRepository(database)
-	if err := taskRepo.Create(context.Background(), &models.LoopTask{
-		LoopID: loopEntry.ID,
-		Key:    "wait-agent-b",
-		Title:  "Wait for response from agent-b",
-		Status: models.LoopTaskStatusBlocked,
-		Detail: "asked about schema mismatch",
+	workRepo := db.NewLoopWorkStateRepository(database)
+	if err := workRepo.SetCurrent(context.Background(), &models.LoopWorkState{
+		LoopID:        loopEntry.ID,
+		AgentID:       "loop-mem",
+		TaskID:        "sv-abc123",
+		Status:        "blocked",
+		Detail:        "asked about schema mismatch",
+		LoopIteration: 7,
 	}); err != nil {
-		t.Fatalf("create task: %v", err)
+		t.Fatalf("set work state: %v", err)
 	}
 
 	kvRepo := db.NewLoopKVRepository(database)
@@ -418,11 +419,11 @@ func TestRunnerInjectsPersistentMemoryIntoPrompt(t *testing.T) {
 		t.Fatalf("run once: %v", err)
 	}
 
-	if !strings.Contains(capturedPrompt, "Loop Memory (persistent)") {
-		t.Fatalf("expected memory section injected into prompt")
+	if !strings.Contains(capturedPrompt, "Loop Context (persistent)") {
+		t.Fatalf("expected context section injected into prompt")
 	}
-	if !strings.Contains(capturedPrompt, "wait-agent-b") || !strings.Contains(capturedPrompt, "Wait for response from agent-b") {
-		t.Fatalf("expected task injected into prompt")
+	if !strings.Contains(capturedPrompt, "sv-abc123") || !strings.Contains(capturedPrompt, "blocked") {
+		t.Fatalf("expected current task context injected into prompt")
 	}
 	if !strings.Contains(capturedPrompt, "blocked_on") || !strings.Contains(capturedPrompt, "agent-b reply") {
 		t.Fatalf("expected kv injected into prompt")
