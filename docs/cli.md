@@ -189,6 +189,28 @@ Run a single iteration for a loop.
 forge run review-loop
 ```
 
+### `forge mem`
+
+Persistent per-loop key/value memory (stored in Forge DB). Defaults to current loop via `FORGE_LOOP_ID`.
+
+```bash
+forge mem set blocked_on "waiting for agent-b"
+forge mem get blocked_on
+forge mem ls
+forge mem rm blocked_on
+```
+
+### `forge work`
+
+Persistent per-loop "what am I working on" pointer (stored in Forge DB). Task-tech-agnostic. Defaults to current loop via `FORGE_LOOP_ID`.
+
+```bash
+forge work set sv-1v3 --status blocked --detail "waiting for agent-b"
+forge work current
+forge work ls
+forge work clear
+```
+
 ## Prompt and template helpers
 
 ### `forge prompt`
