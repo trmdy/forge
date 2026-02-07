@@ -234,6 +234,12 @@ func TestRunnerInjectsLoopEnv(t *testing.T) {
 	if capturedProfile.Env["FMAIL_AGENT"] != "manual-agent" {
 		t.Fatalf("expected explicit FMAIL_AGENT to be preserved, got %q", capturedProfile.Env["FMAIL_AGENT"])
 	}
+	if capturedProfile.Env["SV_REPO"] != repoDir {
+		t.Fatalf("expected SV_REPO=%q, got %q", repoDir, capturedProfile.Env["SV_REPO"])
+	}
+	if capturedProfile.Env["SV_ACTOR"] != "manual-agent" {
+		t.Fatalf("expected SV_ACTOR=%q, got %q", "manual-agent", capturedProfile.Env["SV_ACTOR"])
+	}
 	if capturedProfile.Env["CUSTOM_ENV"] != "ok" {
 		t.Fatalf("expected CUSTOM_ENV to be preserved, got %q", capturedProfile.Env["CUSTOM_ENV"])
 	}
@@ -287,6 +293,12 @@ func TestRunnerDefaultsFmailAgentToLoopName(t *testing.T) {
 
 	if capturedProfile.Env["FMAIL_AGENT"] != loopEntry.Name {
 		t.Fatalf("expected FMAIL_AGENT=%q, got %q", loopEntry.Name, capturedProfile.Env["FMAIL_AGENT"])
+	}
+	if capturedProfile.Env["SV_REPO"] != repoDir {
+		t.Fatalf("expected SV_REPO=%q, got %q", repoDir, capturedProfile.Env["SV_REPO"])
+	}
+	if capturedProfile.Env["SV_ACTOR"] != loopEntry.Name {
+		t.Fatalf("expected SV_ACTOR=%q, got %q", loopEntry.Name, capturedProfile.Env["SV_ACTOR"])
 	}
 }
 

@@ -621,6 +621,12 @@ func profileWithLoopEnv(profile *models.Profile, loopEntry *models.Loop) *models
 		if strings.TrimSpace(env["FMAIL_AGENT"]) == "" {
 			env["FMAIL_AGENT"] = loopEntry.Name
 		}
+		if strings.TrimSpace(env["SV_REPO"]) == "" {
+			env["SV_REPO"] = loopEntry.RepoPath
+		}
+		if strings.TrimSpace(env["SV_ACTOR"]) == "" {
+			env["SV_ACTOR"] = env["FMAIL_AGENT"]
+		}
 	}
 
 	effective.Env = env
